@@ -1,3 +1,14 @@
-password-break/.direnv
-password-break/password-break/.idea
-password-break/password-break/password-break-server/obj
+# IDE
+.idea/
+.vs/
+
+# Environment
+.direnv/
+
+# .NET build
+bin/
+obj/
+
+# Visual Studio user config
+*.csproj.user
+*.slnLaunch.user
