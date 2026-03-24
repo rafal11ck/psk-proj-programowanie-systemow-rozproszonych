@@ -1,0 +1,7 @@
+﻿services:
+  password-break-server:
+    image: password-break-server
+    build:
+      context: .
+      dockerfile: password-break-server/Dockerfile
+

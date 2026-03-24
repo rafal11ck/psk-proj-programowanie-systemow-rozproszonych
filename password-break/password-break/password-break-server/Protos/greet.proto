@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-option csharp_namespace = "server";
+option csharp_namespace = "password_break_server";
 
 package greet;
 

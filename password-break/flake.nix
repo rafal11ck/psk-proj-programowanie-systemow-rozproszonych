@@ -18,6 +18,7 @@
 
           buildInputs = with pkgs; [
             dotnet-sdk_10
+            icu
           ];
         };
       }
