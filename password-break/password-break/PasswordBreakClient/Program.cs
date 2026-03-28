@@ -1,5 +1,7 @@
-﻿using Grpc.Net.Client;
+﻿using Grpc.Core;
+using Grpc.Net.Client;
 using password_break_server;
+using System.Threading.Channels;
 
 namespace ConsoleApp1
 {
@@ -7,7 +9,10 @@ namespace ConsoleApp1
     {
         static async Task Main(string[] args)
         {
-            using var channel = GrpcChannel.ForAddress("https://localhost:7178");
+            using var channel = GrpcChannel.ForAddress("http://81.26.20.142:5210", new GrpcChannelOptions
+            {
+                Credentials = ChannelCredentials.Insecure
+            });
             var client = new Greeter.GreeterClient(channel);
 
             Console.WriteLine("Połączono z serwerem gRPC.");
