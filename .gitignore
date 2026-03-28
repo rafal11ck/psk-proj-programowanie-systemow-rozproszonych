@@ -1,14 +1,23 @@
 # IDE
 .idea/
 .vs/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
 
 # Environment
 .direnv/
+.env
 
 # .NET build
-bin/
-obj/
+**/bin/
+**/obj/
 
-# Visual Studio user config
-*.csproj.user
-*.slnLaunch.user
+# Visual Studio / Rider
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
