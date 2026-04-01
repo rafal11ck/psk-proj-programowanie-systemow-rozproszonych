@@ -1,48 +1,5 @@
-﻿using Grpc.Core;
-using Grpc.Net.Client;
-using password_break_server;
-using System.Threading.Channels;
+using password_break_client;
 
-namespace ConsoleApp1
-{
-    internal class Program
-    {
-        static async Task Main(string[] args)
-        {
-            using var channel = GrpcChannel.ForAddress("http://81.26.20.142:5210", new GrpcChannelOptions
-            {
-                Credentials = ChannelCredentials.Insecure
-            });
-            var client = new Greeter.GreeterClient(channel);
-
-            Console.WriteLine("Połączono z serwerem gRPC.");
-            Console.WriteLine("Wpisz wiadomość i naciśnij Enter. Wpisz 'exit', aby zakończyć.");
-
-            while (true)
-            {
-                Console.Write("Ty: ");
-                var text = Console.ReadLine();
-
-                if (string.IsNullOrWhiteSpace(text))
-                    continue;
-
-                if (text.Equals("exit", StringComparison.OrdinalIgnoreCase))
-                    break;
-
-                try
-                {
-                    var reply = await client.SayHelloAsync(new HelloRequest
-                    {
-                        Name = text
-                    });
-
-                    Console.WriteLine($"Serwer: {reply.Message}");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Błąd połączenia: {ex.Message}");
-                }
-            }
-        }
-    }
-}
+var serverUrl = args.Length > 0 ? args[0] : "http://localhost:5210";
+var client = new GrpcClient(serverUrl);
+await client.RunAsync();
