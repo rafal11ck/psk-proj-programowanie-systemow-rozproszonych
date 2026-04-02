@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using password_break_client;
 
 AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);

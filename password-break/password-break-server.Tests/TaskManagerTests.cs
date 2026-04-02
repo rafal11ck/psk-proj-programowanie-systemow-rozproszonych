@@ -102,7 +102,7 @@ public class TaskManagerTests
 
         var task1 = manager.GetNextTask("client1");
         manager.MarkPending(task1!.TaskId);
-        
+
         var task2 = manager.GetNextTask("client2");
 
         Assert.NotNull(task2);
@@ -174,6 +174,34 @@ public class TaskManagerTests
                 ChunkSize = 2
             };
             var manager = new TaskManager(config, CreateFoundPasswords());
+
+            var task = manager.GetNextTask("client1");
+
+            Assert.NotNull(task);
+            Assert.Equal(0, task!.StartIndex);
+            Assert.Equal(1, task.EndIndex);
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public void TaskManager_DictionaryGeneratesCorrectRange()
+    {
+        var tempFile = Path.GetTempFileName();
+        File.WriteAllLines(tempFile, new[] { "a", "b", "c", "d", "e" });
+
+        try
+        {
+            var config = new PasswordBreakConfig
+            {
+                AttackMode = "dictionary",
+                WordListPath = tempFile,
+                ChunkSize = 2
+            };
+            var manager = CreateManager(config);
 
             var task = manager.GetNextTask("client1");
 

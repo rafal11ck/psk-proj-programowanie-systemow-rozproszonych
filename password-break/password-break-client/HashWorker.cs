@@ -5,6 +5,8 @@ namespace password_break_client;
 
 public static class HashWorker
 {
+    private const long CancellationCheckMask = 0xFFF; // Check cancellation every 4096 iterations
+
     public static string ComputeSha256(string password)
     {
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(password));

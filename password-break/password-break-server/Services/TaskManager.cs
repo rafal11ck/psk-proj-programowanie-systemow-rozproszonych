@@ -2,7 +2,7 @@ using password_break_server.Models;
 
 namespace password_break_server.Services;
 
-public class TaskManager
+public class TaskManager : ITaskManager
 {
     private readonly PasswordBreakConfig _config;
     private readonly FoundPasswords _foundPasswords;
@@ -23,12 +23,9 @@ public class TaskManager
         InitializeTasks();
     }
 
-    private void LoadWordList()
+    private void InitializeTasks(long totalItems)
     {
-        if (_config.AttackMode != "dictionary" || string.IsNullOrEmpty(_config.WordListPath))
-            return;
-
-        if (File.Exists(_config.WordListPath))
+        for (var start = 0L; start < totalItems; start += _config.ChunkSize)
         {
             var lines = File.ReadAllLines(_config.WordListPath)
                 .Where(l => !string.IsNullOrWhiteSpace(l))

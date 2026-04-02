@@ -1,12 +1,14 @@
 using Grpc.Core;
 using Grpc.Net.Client;
-using password_break_server;
+using Microsoft.Extensions.Logging;
 
 namespace password_break_client;
 
-public class GrpcClient
+public class GrpcClient : IAsyncDisposable
 {
     private readonly string _serverUrl;
+    private readonly IWordlistManager _wordlistManager;
+    private readonly ILogger<GrpcClient> _logger;
     private readonly CancellationTokenSource _cts = new();
     private string? _currentTaskId;
     private AsyncDuplexStreamingCall<ClientMessage, ServerMessage>? _currentCall;
@@ -21,9 +23,17 @@ public class GrpcClient
     private HashSet<string> _targetHashes = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _writeLock = new(1, 1);
 
-    public GrpcClient(string serverUrl)
+    private volatile bool _isConnected;
+    private volatile int _heartbeatIntervalMs = 15000;
+    private AsyncDuplexStreamingCall<ClientMessage, ServerMessage>? _currentCall;
+    private IClientAttackStrategy? _attackStrategy;
+    private HashSet<string> _targetHashes = new(StringComparer.OrdinalIgnoreCase);
+
+    public GrpcClient(string serverUrl, IWordlistManager wordlistManager, ILogger<GrpcClient> logger)
     {
         _serverUrl = serverUrl;
+        _wordlistManager = wordlistManager;
+        _logger = logger;
 
         Console.CancelKeyPress += (_, e) =>
         {
@@ -98,7 +108,68 @@ public class GrpcClient
             }
         }
 
-        Console.WriteLine("[CLIENT] Shutdown complete");
+        _logger.LogInformation("Shutdown complete");
+    }
+
+    private async Task ConnectAndProcess()
+    {
+        _logger.LogInformation("Connecting to {ServerUrl}...", _serverUrl);
+
+        using var channel = GrpcChannel.ForAddress(_serverUrl, new GrpcChannelOptions
+        {
+            Credentials = ChannelCredentials.Insecure,
+            HttpHandler = new SocketsHttpHandler
+            {
+                EnableMultipleHttp2Connections = true,
+                ConnectTimeout = TimeSpan.FromSeconds(10),
+            }
+        });
+
+        var client = new PasswordBreaker.PasswordBreakerClient(channel);
+        _currentCall = client.Connect();
+        _isConnected = true;
+
+        using var connectionCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+        var ct = connectionCts.Token;
+
+        var heartbeatTask = HeartbeatLoop(ct);
+        var receiverTask = ReceiverLoop(_currentCall, ct);
+
+        try
+        {
+            var localTimestamp = _wordlistManager.GetLocalTimestamp();
+            await SendMessageAsync(new ClientMessage
+            {
+                Hello = new Hello { WordlistTimestamp = localTimestamp }
+            }, ct);
+            _logger.LogInformation("Connected, sending hello... (Ctrl+C to stop)");
+
+            await Task.WhenAny(heartbeatTask, receiverTask);
+        }
+        finally
+        {
+            _isConnected = false;
+            await connectionCts.CancelAsync();
+
+            try { await heartbeatTask; } catch { }
+            try { await receiverTask; } catch { }
+
+            try { await _currentCall.RequestStream.CompleteAsync(); } catch { }
+        }
+    }
+
+    private void ResetState()
+    {
+        _isConnected = false;
+        _currentCall = null;
+        _attackStrategy = null;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _cts.CancelAsync();
+        _cts.Dispose();
+        _writeLock.Dispose();
     }
 
     private long GetLocalWordListTimestamp()
@@ -149,7 +220,7 @@ public class GrpcClient
 
     private async Task ProcessAndSendResult(HashTask task, CancellationToken ct)
     {
-        if (_currentCall == null) return;
+        if (_currentCall == null || _attackStrategy == null) return;
 
         var found = _isDictionary
             ? HashWorker.ProcessDictionary(_wordList, task.StartIndex, task.EndIndex, _targetHashes)
@@ -171,7 +242,7 @@ public class GrpcClient
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[ERROR] Failed to send result: {ex.Message}");
+            _logger.LogError("Failed to send result: {Message}", ex.Message);
         }
     }
 
@@ -186,7 +257,21 @@ public class GrpcClient
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            Console.WriteLine($"[ERROR] Failed to request task: {ex.Message}");
+            _logger.LogError("Failed to request task: {Message}", ex.Message);
+        }
+    }
+
+    private async Task SendMessageAsync(ClientMessage message, CancellationToken ct)
+    {
+        await _writeLock.WaitAsync(ct);
+        try
+        {
+            if (_currentCall != null && _isConnected)
+                await _currentCall.RequestStream.WriteAsync(message, ct);
+        }
+        finally
+        {
+            _writeLock.Release();
         }
     }
 
@@ -230,8 +315,34 @@ public class GrpcClient
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ERROR] Heartbeat failed: {ex.Message}");
+                _logger.LogError("Heartbeat failed: {Message}", ex.Message);
             }
+        }
+    }
+
+    private async Task<IClientAttackStrategy> CreateStrategy(Config config)
+    {
+        switch (config.AttackConfigCase)
+        {
+            case Config.AttackConfigOneofCase.Dictionary:
+                _logger.LogInformation("Mode: dictionary, Targets: {Count}", config.TargetHashes.Count);
+
+                var localTimestamp = _wordlistManager.GetLocalTimestamp();
+                if (localTimestamp != config.WordlistTimestamp)
+                {
+                    try { await _wordlistManager.DownloadAsync(_serverUrl); }
+                    catch (Exception ex) { _logger.LogWarning("Could not download wordlist: {Message}", ex.Message); }
+                }
+
+                var wordList = _wordlistManager.Load();
+                return new DictionaryClientStrategy(wordList);
+
+            case Config.AttackConfigOneofCase.BruteForce:
+                _logger.LogInformation("Mode: bruteforce, Charset: {Charset}, Length: {Min}-{Max}, Targets: {Count}", config.BruteForce.Charset, config.BruteForce.MinLength, config.BruteForce.MaxLength, config.TargetHashes.Count);
+                return new BruteForceClientStrategy(config.BruteForce.Charset, config.BruteForce.MinLength, config.BruteForce.MaxLength);
+
+            default:
+                throw new InvalidOperationException($"Unknown attack config: {config.AttackConfigCase}");
         }
     }
 
@@ -288,19 +399,16 @@ public class GrpcClient
                         break;
 
                     case ServerMessage.MessageOneofCase.Ack:
-                        Console.WriteLine($"[ACK] {message.Ack.Message}");
-                        _currentTaskId = null;
+                        _logger.LogInformation("Ack: {Message}", message.Ack.Message);
                         await RequestTaskAfterDelay(ct);
                         break;
                 }
             }
         }
-        catch (OperationCanceledException)
-        {
-        }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            Console.WriteLine($"[ERROR] Receiver: {ex.Message}");
+            _logger.LogError("Receiver: {Message}", ex.Message);
         }
     }
 }
