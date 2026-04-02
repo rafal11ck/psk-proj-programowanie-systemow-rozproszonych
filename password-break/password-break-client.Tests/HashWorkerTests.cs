@@ -39,53 +39,101 @@ public class HashWorkerTests
     }
 
     [Fact]
-    public void ProcessBruteForce_SingleChar_CorrectCount()
+    public void ProcessBruteForce_OnlyReturnsMatchingHashes()
     {
-        var results = HashWorker.ProcessBruteForce("abc", 1, 0, 2).ToList();
+        var targetHash = HashWorker.ComputeSha256("b");
+        var targetHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { targetHash };
         
-        Assert.Equal(3, results.Count);
-        Assert.Equal(("a", HashWorker.ComputeSha256("a")), results[0]);
-        Assert.Equal(("b", HashWorker.ComputeSha256("b")), results[1]);
-        Assert.Equal(("c", HashWorker.ComputeSha256("c")), results[2]);
+        var results = HashWorker.ProcessBruteForce("abc", 1, 1, 0, 2, targetHashes).ToList();
+        
+        Assert.Single(results);
+        Assert.Equal("b", results[0].Password);
+        Assert.Equal(targetHash, results[0].Hash);
     }
 
     [Fact]
-    public void ProcessBruteForce_SubsetRange_CorrectPasswords()
+    public void ProcessBruteForce_NoMatches_ReturnsEmpty()
     {
-        var results = HashWorker.ProcessBruteForce("abc", 2, 0, 2).ToList();
+        var targetHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "nonexistent" };
         
-        Assert.Equal(3, results.Count);
-        Assert.Equal("aa", results[0].Password);
-        Assert.Equal("ab", results[1].Password);
-        Assert.Equal("ac", results[2].Password);
+        var results = HashWorker.ProcessBruteForce("abc", 1, 1, 0, 2, targetHashes).ToList();
+        
+        Assert.Empty(results);
     }
 
     [Fact]
-    public void ProcessBruteForce_TwoCharCharset_CorrectCount()
+    public void ProcessBruteForce_MultipleMatches_ReturnsAll()
     {
-        var results = HashWorker.ProcessBruteForce("ab", 2, 0, 3).ToList();
+        var hashA = HashWorker.ComputeSha256("a");
+        var hashB = HashWorker.ComputeSha256("b");
+        var targetHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { hashA, hashB };
         
-        Assert.Equal(4, results.Count);
-        Assert.Equal("aa", results[0].Password);
-        Assert.Equal("ab", results[1].Password);
-        Assert.Equal("ba", results[2].Password);
-        Assert.Equal("bb", results[3].Password);
-    }
-
-    [Fact]
-    public void ProcessWords_ReturnsCorrectHashes()
-    {
-        var results = HashWorker.ProcessWords(new[] { "hello", "world" }).ToList();
+        var results = HashWorker.ProcessBruteForce("abc", 1, 1, 0, 2, targetHashes).ToList();
         
         Assert.Equal(2, results.Count);
-        Assert.Equal(("hello", HashWorker.ComputeSha256("hello")), results[0]);
-        Assert.Equal(("world", HashWorker.ComputeSha256("world")), results[1]);
     }
 
     [Fact]
-    public void ProcessWords_EmptyList_ReturnsEmpty()
+    public void ProcessBruteForce_MultipleLengths_IteratesCorrectly()
     {
-        var results = HashWorker.ProcessWords(Array.Empty<string>()).ToList();
+        var hashA1 = HashWorker.ComputeSha256("a");
+        var hashAA = HashWorker.ComputeSha256("aa");
+        var targetHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { hashA1, hashAA };
+        
+        var results = HashWorker.ProcessBruteForce("a", 1, 2, 0, 1, targetHashes).ToList();
+        
+        Assert.Equal(2, results.Count);
+    }
+
+    [Fact]
+    public void ProcessBruteForce_CrossLengthRange()
+    {
+        var hashA = HashWorker.ComputeSha256("a");
+        var hashB = HashWorker.ComputeSha256("b");
+        var hashAA = HashWorker.ComputeSha256("aa");
+        var targetHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { hashA, hashB, hashAA };
+        
+        var results = HashWorker.ProcessBruteForce("ab", 1, 2, 0, 5, targetHashes).ToList();
+        
+        Assert.Equal(3, results.Count);
+    }
+
+    [Fact]
+    public void ProcessDictionary_OnlyReturnsMatchingHashes()
+    {
+        var targetHash = HashWorker.ComputeSha256("world");
+        var targetHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { targetHash };
+        var wordList = new List<string> { "hello", "world", "test" };
+        
+        var results = HashWorker.ProcessDictionary(wordList, 0, 2, targetHashes).ToList();
+        
+        Assert.Single(results);
+        Assert.Equal("world", results[0].Password);
+    }
+
+    [Fact]
+    public void ProcessDictionary_RangeLimits_RespectsRange()
+    {
+        var hashA = HashWorker.ComputeSha256("a");
+        var hashB = HashWorker.ComputeSha256("b");
+        var hashC = HashWorker.ComputeSha256("c");
+        var targetHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { hashA, hashB, hashC };
+        var wordList = new List<string> { "a", "b", "c", "d" };
+        
+        var results = HashWorker.ProcessDictionary(wordList, 0, 1, targetHashes).ToList();
+        
+        Assert.Equal(2, results.Count);
+        Assert.Equal("a", results[0].Password);
+        Assert.Equal("b", results[1].Password);
+    }
+
+    [Fact]
+    public void ProcessDictionary_EmptyList_ReturnsEmpty()
+    {
+        var targetHashes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "hash" };
+        var wordList = new List<string>();
+        
+        var results = HashWorker.ProcessDictionary(wordList, 0, 10, targetHashes).ToList();
         
         Assert.Empty(results);
     }

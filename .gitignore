@@ -21,3 +21,4 @@ Thumbs.db
 *.suo
 *.userosscache
 *.sln.docstates
+password-break/password-break-server/results.csv

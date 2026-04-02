@@ -5,14 +5,20 @@ namespace password_break_server.Services;
 public class TaskManager
 {
     private readonly PasswordBreakConfig _config;
-    private List<string> _wordList = [];
+    private readonly FoundPasswords _foundPasswords;
     private readonly Dictionary<string, TaskInfo> _tasks = new();
     private readonly Queue<string> _pendingTasks = new();
     private readonly Lock _lock = new();
+    private readonly List<string> _wordList = [];
 
-    public TaskManager(PasswordBreakConfig config)
+    public IReadOnlyList<string> TargetHashes => _config.TargetHashes;
+    public IReadOnlyList<string> WordList => _wordList;
+    public string? WordListPath => _config.WordListPath;
+
+    public TaskManager(PasswordBreakConfig config, FoundPasswords foundPasswords)
     {
         _config = config;
+        _foundPasswords = foundPasswords;
         LoadWordList();
         InitializeTasks();
     }
@@ -24,75 +30,61 @@ public class TaskManager
 
         if (File.Exists(_config.WordListPath))
         {
-            _wordList = File.ReadAllLines(_config.WordListPath)
+            var lines = File.ReadAllLines(_config.WordListPath)
                 .Where(l => !string.IsNullOrWhiteSpace(l))
-                .Select(l => l.Trim())
-                .ToList();
+                .Select(l => l.Trim());
+            _wordList.AddRange(lines);
         }
     }
 
     private void InitializeTasks()
     {
-        if (_config.AttackMode == "dictionary")
-            InitializeDictionaryTasks();
-        else
-            InitializeBruteForceTasks();
-    }
-
-    private void InitializeDictionaryTasks()
-    {
-        for (var i = 0; i < _wordList.Count; i += _config.ChunkSize)
+        var totalItems = _config.AttackMode switch
         {
-            var chunk = _wordList.Skip(i).Take(_config.ChunkSize).ToList();
-            var taskId = $"dict_{i / _config.ChunkSize}";
-            _tasks[taskId] = new TaskInfo { TaskId = taskId, TaskData = chunk };
+            "dictionary" => _wordList.Count,
+            _ => CalculateBruteForceTotal()
+        };
+
+        for (var start = 0L; start < totalItems; start += _config.ChunkSize)
+        {
+            var end = Math.Min(start + _config.ChunkSize - 1, totalItems - 1);
+            var taskId = $"{start}_{end}";
+            
+            _tasks[taskId] = new TaskInfo
+            {
+                TaskId = taskId,
+                StartIndex = start,
+                EndIndex = end
+            };
             _pendingTasks.Enqueue(taskId);
         }
     }
 
-    private void InitializeBruteForceTasks()
+    private long CalculateBruteForceTotal()
     {
-        var taskId = 0L;
+        long total = 0;
         for (var length = _config.MinLength; length <= _config.MaxLength; length++)
-        {
-            var total = (long)Math.Pow(_config.CharSet.Length, length);
-            for (var start = 0L; start < total; start += _config.ChunkSize)
-            {
-                var end = Math.Min(start + _config.ChunkSize - 1, total - 1);
-                var id = $"bf_{length}_{taskId++}";
-                _tasks[id] = new TaskInfo
-                {
-                    TaskId = id,
-                    TaskData = new BruteForceTaskData
-                    {
-                        CharSet = _config.CharSet,
-                        Length = length,
-                        StartIndex = start,
-                        EndIndex = end
-                    }
-                };
-                _pendingTasks.Enqueue(id);
-            }
-        }
+            total += (long)Math.Pow(_config.CharSet.Length, length);
+        return total;
     }
 
     public TaskInfo? GetNextTask(string clientId)
     {
         lock (_lock)
         {
-            while (_pendingTasks.Count > 0)
-            {
-                var taskId = _pendingTasks.Dequeue();
-                var task = _tasks[taskId];
-                
-                if (task.Status != "pending" && !IsExpired(task)) continue;
-                
-                task.Status = "in_progress";
-                task.ClientId = clientId;
-                task.AssignedAt = DateTime.UtcNow;
-                return task;
-            }
-            return null;
+            if (_foundPasswords.AllFound)
+                return null;
+
+            if (_pendingTasks.Count == 0)
+                return null;
+
+            var taskId = _pendingTasks.Dequeue();
+            var task = _tasks[taskId];
+
+            task.Status = HashTaskStatus.InProgress;
+            task.ClientId = clientId;
+            task.StartedAt = DateTime.UtcNow;
+            return task;
         }
     }
 
@@ -101,7 +93,7 @@ public class TaskManager
         lock (_lock)
         {
             if (_tasks.TryGetValue(taskId, out var task))
-                task.Status = "completed";
+                task.Status = HashTaskStatus.Completed;
         }
     }
 
@@ -109,50 +101,68 @@ public class TaskManager
     {
         lock (_lock)
         {
-            if (_tasks.TryGetValue(taskId, out var task) && task.Status == "in_progress")
+            if (_tasks.TryGetValue(taskId, out var task) && task.Status == HashTaskStatus.InProgress)
             {
-                task.Status = "pending";
+                task.Status = HashTaskStatus.Pending;
                 task.ClientId = null;
                 _pendingTasks.Enqueue(taskId);
             }
         }
     }
 
-    public void TouchTask(string taskId)
+    public void ClearPending()
+    {
+        lock (_lock)
+            _pendingTasks.Clear();
+    }
+
+    public List<string> RequeueClientTasks(string clientId)
     {
         lock (_lock)
         {
-            if (_tasks.TryGetValue(taskId, out var task) && task.Status == "in_progress")
-            {
-                task.AssignedAt = DateTime.UtcNow;
-            }
-        }
-    }
+            var tasks = _tasks.Values
+                .Where(t => t.Status == HashTaskStatus.InProgress && t.ClientId == clientId)
+                .ToList();
 
-    private bool IsExpired(TaskInfo task)
-    {
-        return task.Status == "in_progress" && 
-               (DateTime.UtcNow - task.AssignedAt).TotalSeconds > _config.HeartbeatTimeoutSeconds;
-    }
-
-    public void CheckExpiredTasks()
-    {
-        lock (_lock)
-        {
-            foreach (var task in _tasks.Values.Where(t => IsExpired(t)))
+            foreach (var task in tasks)
             {
-                task.Status = "pending";
+                task.Status = HashTaskStatus.Pending;
                 task.ClientId = null;
                 _pendingTasks.Enqueue(task.TaskId);
             }
+
+            return tasks.Select(t => t.TaskId).ToList();
         }
     }
 
-    public (int Completed, int Total) GetProgress()
+    public (int Completed, int Total, int Pending) GetProgress()
     {
         lock (_lock)
         {
-            return (_tasks.Values.Count(t => t.Status == "completed"), _tasks.Count);
+            return (
+                _tasks.Values.Count(t => t.Status == HashTaskStatus.Completed),
+                _tasks.Count,
+                _pendingTasks.Count
+            );
         }
+    }
+
+    public List<TaskInfo> GetActiveTasks()
+    {
+        lock (_lock)
+        {
+            return _tasks.Values
+                .Where(t => t.Status == HashTaskStatus.InProgress)
+                .OrderBy(t => t.ClientId)
+                .ToList();
+        }
+    }
+
+    public long GetWordListTimestamp()
+    {
+        if (string.IsNullOrEmpty(_config.WordListPath) || !File.Exists(_config.WordListPath))
+            return 0;
+        
+        return new FileInfo(_config.WordListPath).LastWriteTimeUtc.Ticks;
     }
 }

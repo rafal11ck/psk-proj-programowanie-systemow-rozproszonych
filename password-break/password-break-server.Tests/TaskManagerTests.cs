@@ -5,6 +5,8 @@ namespace password_break_server.Tests;
 
 public class TaskManagerTests
 {
+    private FoundPasswords CreateFoundPasswords() => new(["test_hash_1", "test_hash_2"]);
+
     [Fact]
     public void GetNextTask_ReturnsFirstTask()
     {
@@ -16,12 +18,14 @@ public class TaskManagerTests
             MaxLength = 1,
             ChunkSize = 10
         };
-        var manager = new TaskManager(config);
+        var manager = new TaskManager(config, CreateFoundPasswords());
 
         var task = manager.GetNextTask("client1");
 
         Assert.NotNull(task);
-        Assert.Equal("bf_1_0", task.TaskId);
+        Assert.Equal("0_2", task.TaskId);
+        Assert.Equal(0, task.StartIndex);
+        Assert.Equal(2, task.EndIndex);
     }
 
     [Fact]
@@ -35,10 +39,10 @@ public class TaskManagerTests
             MaxLength = 1,
             ChunkSize = 10
         };
-        var manager = new TaskManager(config);
+        var manager = new TaskManager(config, CreateFoundPasswords());
 
         manager.GetNextTask("client1");
-        manager.MarkCompleted("bf_1_0");
+        manager.MarkCompleted("0_0");
         var task = manager.GetNextTask("client2");
 
         Assert.Null(task);
@@ -55,12 +59,12 @@ public class TaskManagerTests
             MaxLength = 1,
             ChunkSize = 10
         };
-        var manager = new TaskManager(config);
+        var manager = new TaskManager(config, CreateFoundPasswords());
 
         var task = manager.GetNextTask("client123");
 
         Assert.Equal("client123", task!.ClientId);
-        Assert.Equal("in_progress", task.Status);
+        Assert.Equal(HashTaskStatus.InProgress, task.Status);
     }
 
     [Fact]
@@ -74,7 +78,7 @@ public class TaskManagerTests
             MaxLength = 1,
             ChunkSize = 10
         };
-        var manager = new TaskManager(config);
+        var manager = new TaskManager(config, CreateFoundPasswords());
 
         var task = manager.GetNextTask("client1");
         manager.MarkCompleted(task!.TaskId);
@@ -94,7 +98,7 @@ public class TaskManagerTests
             MaxLength = 1,
             ChunkSize = 10
         };
-        var manager = new TaskManager(config);
+        var manager = new TaskManager(config, CreateFoundPasswords());
 
         var task1 = manager.GetNextTask("client1");
         manager.MarkPending(task1!.TaskId);
@@ -119,15 +123,15 @@ public class TaskManagerTests
                 WordListPath = tempFile,
                 ChunkSize = 2
             };
-            var manager = new TaskManager(config);
+            var manager = new TaskManager(config, CreateFoundPasswords());
 
             var task1 = manager.GetNextTask("client1");
             var task2 = manager.GetNextTask("client2");
 
             Assert.NotNull(task1);
             Assert.NotNull(task2);
-            Assert.StartsWith("dict_", task1!.TaskId);
-            Assert.StartsWith("dict_", task2!.TaskId);
+            Assert.Equal("0_1", task1!.TaskId);
+            Assert.Equal("2_2", task2!.TaskId);
         }
         finally
         {
@@ -142,19 +146,44 @@ public class TaskManagerTests
         {
             AttackMode = "bruteforce",
             CharSet = "abc",
-            MinLength = 2,
-            MaxLength = 2,
-            ChunkSize = 3
+            MinLength = 1,
+            MaxLength = 1,
+            ChunkSize = 10
         };
-        var manager = new TaskManager(config);
+        var manager = new TaskManager(config, CreateFoundPasswords());
 
         var task = manager.GetNextTask("client1");
-        var data = task!.TaskData as BruteForceTaskData;
 
-        Assert.NotNull(data);
-        Assert.Equal("abc", data!.CharSet);
-        Assert.Equal(2, data.Length);
-        Assert.Equal(0, data.StartIndex);
-        Assert.Equal(2, data.EndIndex);
+        Assert.NotNull(task);
+        Assert.Equal(0, task!.StartIndex);
+        Assert.Equal(2, task.EndIndex);
+    }
+
+    [Fact]
+    public void TaskManager_DictionaryGeneratesCorrectRange()
+    {
+        var tempFile = Path.GetTempFileName();
+        File.WriteAllLines(tempFile, new[] { "a", "b", "c", "d", "e" });
+
+        try
+        {
+            var config = new PasswordBreakConfig
+            {
+                AttackMode = "dictionary",
+                WordListPath = tempFile,
+                ChunkSize = 2
+            };
+            var manager = new TaskManager(config, CreateFoundPasswords());
+
+            var task = manager.GetNextTask("client1");
+
+            Assert.NotNull(task);
+            Assert.Equal(0, task!.StartIndex);
+            Assert.Equal(1, task.EndIndex);
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
     }
 }

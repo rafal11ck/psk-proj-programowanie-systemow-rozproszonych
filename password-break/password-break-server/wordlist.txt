@@ -1,10 +1,10 @@
 password
 123456
-password123
 admin
-qwerty
 letmein
-welcome
-monkey
-dragon
-master
+qwerty
+password123
+admin123
+test
+hello
+world

@@ -12,35 +12,70 @@ public static class HashWorker
     }
 
     public static IEnumerable<(string Password, string Hash)> ProcessBruteForce(
-        string charset, int length, long startIndex, long endIndex)
+        string charset, int minLength, int maxLength, long startIndex, long endIndex, HashSet<string> targetHashes)
     {
-        var charsetArray = charset.ToCharArray();
+        var absoluteIndex = startIndex;
+        var (length, localIndex) = GetLengthAndLocalIndex(charset, minLength, maxLength, startIndex);
         
-        for (var i = startIndex; i <= endIndex; i++)
+        while (absoluteIndex <= endIndex && length <= maxLength)
         {
-            var password = IndexToPassword(i, charsetArray, length);
+            var password = IndexToPassword(localIndex, charset, length);
             var hash = ComputeSha256(password);
-            yield return (password, hash);
+            
+            if (targetHashes.Contains(hash))
+            {
+                yield return (password, hash);
+            }
+            
+            absoluteIndex++;
+            localIndex++;
+            
+            var maxForLength = (long)Math.Pow(charset.Length, length);
+            if (localIndex >= maxForLength)
+            {
+                localIndex = 0;
+                length++;
+            }
         }
     }
 
-    public static IEnumerable<(string Password, string Hash)> ProcessWords(IEnumerable<string> words)
+    private static (int length, long localIndex) GetLengthAndLocalIndex(string charset, int minLength, int maxLength, long absoluteIndex)
     {
-        foreach (var word in words)
+        var index = absoluteIndex;
+        for (var length = minLength; length <= maxLength; length++)
         {
-            var hash = ComputeSha256(word);
-            yield return (word, hash);
+            var countForLength = (long)Math.Pow(charset.Length, length);
+            if (index < countForLength)
+            {
+                return (length, index);
+            }
+            index -= countForLength;
+        }
+        return (maxLength, 0);
+    }
+
+    public static IEnumerable<(string Password, string Hash)> ProcessDictionary(
+        IReadOnlyList<string> wordList, long startIndex, long endIndex, HashSet<string> targetHashes)
+    {
+        for (var i = startIndex; i <= endIndex && i < wordList.Count; i++)
+        {
+            var password = wordList[(int)i];
+            var hash = ComputeSha256(password);
+            if (targetHashes.Contains(hash))
+            {
+                yield return (password, hash);
+            }
         }
     }
 
-    private static string IndexToPassword(long index, char[] charset, int length)
+    private static string IndexToPassword(long index, string charset, int length)
     {
         var result = new char[length];
         var charsetLength = charset.Length;
         
         for (var i = length - 1; i >= 0; i--)
         {
-            result[i] = charset[index % charsetLength];
+            result[i] = charset[(int)(index % charsetLength)];
             index /= charsetLength;
         }
         
