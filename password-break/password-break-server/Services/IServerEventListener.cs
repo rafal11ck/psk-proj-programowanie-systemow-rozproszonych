@@ -4,7 +4,6 @@ public interface IServerEventListener
 {
     void ClientConnected(string clientId, string ip);
     void ClientDisconnected(string clientId);
-    void ClientHeartbeat(string clientId);
     void LogTaskAssigned(string clientId, string taskId);
     void LogTaskCompleted(string taskId);
     void LogTaskRequeued(string taskId);

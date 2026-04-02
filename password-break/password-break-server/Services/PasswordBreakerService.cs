@@ -9,17 +9,20 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
     private readonly FoundPasswords _foundPasswords;
     private readonly PasswordBreakConfig _config;
     private readonly IServerEventListener _events;
+    private readonly ClientTracker _clientTracker;
 
     public PasswordBreakerService(
         TaskManager taskManager,
         FoundPasswords foundPasswords,
         PasswordBreakConfig config,
-        IServerEventListener events)
+        IServerEventListener events,
+        ClientTracker clientTracker)
     {
         _taskManager = taskManager;
         _foundPasswords = foundPasswords;
         _config = config;
         _events = events;
+        _clientTracker = clientTracker;
     }
 
     public override async Task Connect(
@@ -31,6 +34,7 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
         var clientIp = context.Peer ?? "unknown";
         var currentTaskId = (string?)null;
 
+        _clientTracker.Connect(clientId, clientIp);
         _events.ClientConnected(clientId, clientIp);
 
         try
@@ -155,12 +159,13 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
 
     private string? HandleHeartbeat(Heartbeat heartbeat, string clientId)
     {
-        _events.ClientHeartbeat(clientId);
+        _clientTracker.Heartbeat(clientId);
         return null;
     }
 
     private Task Cleanup(string clientId, string? currentTaskId)
     {
+        _clientTracker.Disconnect(clientId);
         _events.ClientDisconnected(clientId);
 
         if (currentTaskId != null)

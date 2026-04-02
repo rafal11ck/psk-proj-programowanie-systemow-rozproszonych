@@ -9,26 +9,31 @@ public class ProgressDisplay : IServerEventListener, IDisposable
     private readonly PasswordBreakConfig _config;
     private readonly TaskManager _taskManager;
     private readonly FoundPasswords _foundPasswords;
+    private readonly ClientTracker _clientTracker;
     private readonly DisplayRenderer _renderer = new();
-    private readonly ConcurrentDictionary<string, (DateTime LastSeen, string Ip)> _clients = new();
     private readonly ConcurrentQueue<string> _logs = new();
-    private const int FixedPanelLines = 8;
-    private bool _running = true;
-    private bool _finished;
+    private const int MaxLogLines = 1000;
+    private volatile bool _running;
 
     public bool ShowWorkers { get; set; } = true;
     public bool ShowTasks { get; set; } = true;
     public bool ShowLog { get; set; } = true;
 
-    public ProgressDisplay(PasswordBreakConfig config, TaskManager taskManager, FoundPasswords foundPasswords)
+    public ProgressDisplay(
+        PasswordBreakConfig config,
+        TaskManager taskManager,
+        FoundPasswords foundPasswords,
+        ClientTracker clientTracker)
     {
         _config = config;
         _taskManager = taskManager;
         _foundPasswords = foundPasswords;
+        _clientTracker = clientTracker;
     }
 
     public void Start()
     {
+        _running = true;
         Console.Clear();
         Console.CursorVisible = false;
         Task.Run(async () =>
@@ -64,10 +69,9 @@ public class ProgressDisplay : IServerEventListener, IDisposable
     {
         try
         {
-            if (_finished) return;
+            if (!_running) return;
             var state = BuildState(Console.WindowHeight);
             _renderer.RenderDelta(state, Console.WindowWidth);
-            if (state.AllFound && state.Saved) { _finished = true; _running = false; }
         }
         catch { }
     }
@@ -77,7 +81,7 @@ public class ProgressDisplay : IServerEventListener, IDisposable
         var (completed, total, pending) = _taskManager.GetProgress();
         var found = _foundPasswords.FoundCount;
         var remaining = _foundPasswords.RemainingCount;
-        var clients = GetClientStates();
+        var clients = _clientTracker.GetClientStates(_config.HeartbeatTimeoutSeconds);
         var activeTasks = _taskManager.GetActiveTasks();
 
         int logLines;
@@ -112,31 +116,17 @@ public class ProgressDisplay : IServerEventListener, IDisposable
         };
     }
 
-    private IReadOnlyList<(string Id, string Ip, int Ago, int Timeout)> GetClientStates() =>
-        _clients.OrderBy(c => c.Key).Select(c =>
-        {
-            var ago = (int)(DateTime.UtcNow - c.Value.LastSeen).TotalSeconds;
-            return (c.Key, c.Value.Ip, ago, Math.Max(0, _config.HeartbeatTimeoutSeconds - ago));
-        }).ToList();
-
     public void Stop() => _running = false;
 
     public void ShowFinal()
     {
+        _running = false;
         try
         {
-            _finished = true;
-            _running = false;
             var state = BuildState(Console.WindowHeight);
             Console.Clear();
             _renderer.Render(state, Console.WindowWidth, Console.Out);
             Console.WriteLine();
-            if (state.Found > 0)
-            {
-                if (!state.Saved) _foundPasswords.SaveToFile("results.csv");
-                Console.WriteLine($"Results saved to results.csv ({state.Found} password{(state.Found > 1 ? "s" : "")} found)");
-            }
-            Console.WriteLine("Server stopped.");
             Console.CursorVisible = true;
         }
         catch { Console.CursorVisible = true; }
@@ -145,43 +135,15 @@ public class ProgressDisplay : IServerEventListener, IDisposable
     private void AddLog(string message)
     {
         _logs.Enqueue($"[dim]{DateTime.Now:HH:mm:ss}[/] {message}");
-        while (_logs.Count > 1000) _logs.TryDequeue(out _);
+        while (_logs.Count > MaxLogLines) _logs.TryDequeue(out _);
     }
 
-    public void ClientConnected(string clientId, string ip)
-    {
-        _clients[clientId] = (DateTime.UtcNow, ip);
+    // IServerEventListener — display-only, no state mutation
+    public void ClientConnected(string clientId, string ip) =>
         AddLog($"[green]+[/] Client [white]{clientId}[/] ([dim]{ip.EscapeMarkup()}[/]) connected");
-    }
 
-    public void ClientDisconnected(string clientId)
-    {
-        _clients.TryRemove(clientId, out _);
+    public void ClientDisconnected(string clientId) =>
         AddLog($"[red]-[/] Client [white]{clientId}[/] disconnected");
-    }
-
-    public void ClientHeartbeat(string clientId)
-    {
-        if (_clients.TryGetValue(clientId, out var info))
-            _clients[clientId] = (DateTime.UtcNow, info.Ip);
-    }
-
-    public List<string> CleanupStaleClients(int timeoutSeconds)
-    {
-        var staleClients = new List<string>();
-
-        foreach (var (clientId, info) in _clients)
-        {
-            if ((DateTime.UtcNow - info.LastSeen).TotalSeconds > timeoutSeconds)
-            {
-                _clients.TryRemove(clientId, out _);
-                AddLog($"[red]✕[/] Client [white]{clientId}[/] timed out");
-                staleClients.Add(clientId);
-            }
-        }
-
-        return staleClients;
-    }
 
     public void LogFound(string password, string hash) =>
         AddLog($"[bold green]★[/] Found: [white]{password.EscapeMarkup()}[/] → [dim]{hash[..Math.Min(16, hash.Length)]}…[/]");

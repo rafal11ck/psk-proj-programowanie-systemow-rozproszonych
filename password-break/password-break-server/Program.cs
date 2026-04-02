@@ -3,12 +3,8 @@ using password_break_server.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Suppress logging noise
-builder.Logging.AddFilter("Microsoft", LogLevel.Error);
-builder.Logging.AddFilter("Microsoft.Hosting", LogLevel.Error);
-builder.Logging.AddFilter("Grpc", LogLevel.Error);
-builder.Logging.AddFilter("System", LogLevel.Error);
-builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Error);
+// Remove all logging providers — console belongs exclusively to the TUI
+builder.Logging.ClearProviders();
 
 builder.Services.AddGrpc();
 
@@ -26,26 +22,12 @@ builder.Services.AddSingleton<FoundPasswords>(sp =>
 });
 
 builder.Services.AddSingleton<TaskManager>();
+builder.Services.AddSingleton<ClientTracker>();
 builder.Services.AddSingleton<ProgressDisplay>();
 builder.Services.AddSingleton<IServerEventListener>(sp => sp.GetRequiredService<ProgressDisplay>());
 builder.Services.AddHostedService<ExpiredTaskChecker>();
 
 var app = builder.Build();
-
-var progress = app.Services.GetRequiredService<ProgressDisplay>();
-var foundPasswords = app.Services.GetRequiredService<FoundPasswords>();
-
-Console.Clear();
-progress.Start();
-
-// Graceful exit on Ctrl+C
-Console.CancelKeyPress += (_, e) =>
-{
-    e.Cancel = true;
-    progress.Stop();
-    progress.ShowFinal();
-    Environment.Exit(0);
-};
 
 app.MapGrpcService<PasswordBreakerService>();
 app.MapGet("/", () => "Password Breaker gRPC Server");
@@ -56,4 +38,26 @@ app.MapGet("/wordlist", (PasswordBreakConfig cfg) =>
     return Results.File(cfg.WordListPath, "text/plain");
 });
 
+var progress = app.Services.GetRequiredService<ProgressDisplay>();
+var foundPasswords = app.Services.GetRequiredService<FoundPasswords>();
+
+Console.CancelKeyPress += (_, e) =>
+{
+    e.Cancel = true;
+    progress.Stop();
+    progress.ShowFinal();
+    SaveResults(foundPasswords);
+    Environment.Exit(0);
+};
+
+progress.Start();
 app.Run();
+
+static void SaveResults(FoundPasswords found)
+{
+    if (found.FoundCount > 0 && !found.Saved)
+        found.SaveToFile("results.csv");
+    if (found.FoundCount > 0)
+        Console.WriteLine($"Results saved to results.csv ({found.FoundCount} password{(found.FoundCount > 1 ? "s" : "")} found)");
+    Console.WriteLine("Server stopped.");
+}
