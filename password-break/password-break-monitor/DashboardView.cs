@@ -215,29 +215,40 @@ public class DashboardView : Window
             ? $"{s.FoundCount}/{s.TargetTotal} DONE{(s.Saved ? " [saved]" : "")}"
             : $"{s.FoundCount}/{s.TargetTotal} ({s.RemainingCount} remaining)";
 
-        // Workers — update rows in-place, keep same DataTable
-        _workersData.Rows.Clear();
-        foreach (var c in s.Clients)
-            _workersData.Rows.Add(c.ClientId, c.Ip, $"{c.SecondsAgo}s");
-        ClampRowOffset(_workersTable, _workersData);
-        _workersTable.SetNeedsDraw();
+        UpdateTable(_workersTable, _workersData, s.Clients.Count,
+            i => [s.Clients[i].ClientId, s.Clients[i].Ip, $"{s.Clients[i].SecondsAgo}s"]);
 
-        // Tasks — update rows in-place, keep same DataTable
-        _tasksData.Rows.Clear();
-        foreach (var t in s.ActiveTasks)
-            _tasksData.Rows.Add(t.TaskId, t.ClientId, $"{t.StartIndex}-{t.EndIndex}", $"{t.ElapsedSeconds}s");
-        ClampRowOffset(_tasksTable, _tasksData);
-        _tasksTable.SetNeedsDraw();
+        UpdateTable(_tasksTable, _tasksData, s.ActiveTasks.Count,
+            i => [s.ActiveTasks[i].TaskId, s.ActiveTasks[i].ClientId,
+                  $"{s.ActiveTasks[i].StartIndex}-{s.ActiveTasks[i].EndIndex}",
+                  $"{s.ActiveTasks[i].ElapsedSeconds}s"]);
 
-        // Clamp table scroll so rows don't scroll out of view when they all fit
-        static void ClampRowOffset(TableView table, DataTable data)
+        // Update rows in-place instead of Clear+Add. Rows.Clear() resets
+        // TableView's internal scroll/selection state every tick, making
+        // scrolling impossible. In-place updates preserve everything.
+        static void UpdateTable(TableView table, DataTable data, int count, Func<int, object[]> row)
         {
-            // Header decoration lines (overline + underline) take 2 rows, bottomline takes 1
-            var visibleRows = table.Viewport.Height - 3;
-            if (data.Rows.Count <= visibleRows)
-                table.RowOffset = 0;
-            else
-                table.RowOffset = Math.Min(table.RowOffset, Math.Max(0, data.Rows.Count - visibleRows));
+            while (data.Rows.Count > count)
+                data.Rows.RemoveAt(data.Rows.Count - 1);
+
+            for (int i = 0; i < count; i++)
+            {
+                var values = row(i);
+                if (i < data.Rows.Count)
+                {
+                    for (int c = 0; c < values.Length; c++)
+                        data.Rows[i][c] = values[c];
+                }
+                else
+                {
+                    data.Rows.Add(values);
+                }
+            }
+
+            table.SetNeedsDraw();
+            // When row count drops (esp. to 0) TableView doesn't repaint its
+            // bottom border — force the parent tile to redraw the frame.
+            table.SuperView?.SetNeedsDraw();
         }
 
         // Log — auto-scroll only if user is already at the bottom
