@@ -18,7 +18,13 @@
 
           buildInputs = with pkgs; [
             dotnet-sdk_10
+            ncurses
             icu
+          ];
+
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
+            pkgs.icu
+            pkgs.ncurses
           ];
         };
       }

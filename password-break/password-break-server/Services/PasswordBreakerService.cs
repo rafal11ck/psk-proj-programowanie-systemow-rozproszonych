@@ -119,8 +119,8 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
         hashTask.TargetHashes.AddRange(_taskManager.TargetHashes);
 
         await responseStream.WriteAsync(new ServerMessage { HashTask = hashTask });
-        _events.LogTaskAssigned(clientId, task.TaskId);
-        
+        _events.LogTaskAssigned(clientId, task.TaskId, task.StartIndex, task.EndIndex);
+
         return task.TaskId;
     }
 

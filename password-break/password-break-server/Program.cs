@@ -3,8 +3,7 @@ using password_break_server.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Remove all logging providers — console belongs exclusively to the TUI
-builder.Logging.ClearProviders();
+builder.Host.ConfigureHostOptions(o => o.ShutdownTimeout = TimeSpan.FromSeconds(2));
 
 builder.Services.AddGrpc();
 
@@ -21,15 +20,25 @@ builder.Services.AddSingleton<FoundPasswords>(sp =>
     return new FoundPasswords(config.TargetHashes);
 });
 
-builder.Services.AddSingleton<TaskManager>();
-builder.Services.AddSingleton<ClientTracker>();
-builder.Services.AddSingleton<ProgressDisplay>();
-builder.Services.AddSingleton<IServerEventListener>(sp => sp.GetRequiredService<ProgressDisplay>());
+builder.Services.AddSingleton<ITaskManager, TaskManager>();
+builder.Services.AddSingleton<IClientTracker, ClientTracker>();
+builder.Services.AddSingleton<MonitorEventBroadcaster>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<MonitorEventBroadcaster>());
+builder.Services.AddSingleton<ConsoleLoggingEventListener>();
+builder.Services.AddSingleton<IServerEventListener>(sp =>
+    new CompositeServerEventListener(
+        new IServerEventListener[]
+        {
+            sp.GetRequiredService<ConsoleLoggingEventListener>(),
+            sp.GetRequiredService<MonitorEventBroadcaster>(),
+        },
+        sp.GetRequiredService<ILogger<CompositeServerEventListener>>()));
 builder.Services.AddHostedService<ExpiredTaskChecker>();
 
 var app = builder.Build();
 
 app.MapGrpcService<PasswordBreakerService>();
+app.MapGrpcService<MonitorGrpcService>();
 app.MapGet("/", () => "Password Breaker gRPC Server");
 app.MapGet("/wordlist", (PasswordBreakConfig cfg) =>
 {
@@ -38,22 +47,22 @@ app.MapGet("/wordlist", (PasswordBreakConfig cfg) =>
     return Results.File(cfg.WordListPath, "text/plain");
 });
 
-var progress = app.Services.GetRequiredService<ProgressDisplay>();
-var foundPasswords = app.Services.GetRequiredService<FoundPasswords>();
+var foundPasswords = app.Services.GetRequiredService<IFoundPasswords>();
+
+foundPasswords.OnAllFound += () => SaveResults(foundPasswords);
 
 Console.CancelKeyPress += (_, e) =>
 {
     e.Cancel = true;
-    progress.Stop();
-    progress.ShowFinal();
     SaveResults(foundPasswords);
     Environment.Exit(0);
 };
 
-progress.Start();
-app.Run();
+await app.RunAsync();
 
-static void SaveResults(FoundPasswords found)
+SaveResults(foundPasswords);
+
+static void SaveResults(IFoundPasswords found)
 {
     if (found.FoundCount > 0 && !found.Saved)
         found.SaveToFile("results.csv");
