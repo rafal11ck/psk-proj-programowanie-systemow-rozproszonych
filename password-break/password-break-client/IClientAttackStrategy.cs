@@ -19,7 +19,7 @@ public class BruteForceClientStrategy : IClientAttackStrategy
     }
 
     public IEnumerable<(string Password, string Hash)> Process(long startIndex, long endIndex, HashSet<string> targetHashes, CancellationToken ct)
-        => HashWorker.ProcessBruteForce(_charSet, _minLength, _maxLength, startIndex, endIndex, targetHashes, ct);
+        => HashWorker.ProcessBruteForce(_charSet, _minLength, _maxLength, startIndex, endIndex, targetHashes);
 }
 
 public class DictionaryClientStrategy : IClientAttackStrategy
@@ -32,5 +32,5 @@ public class DictionaryClientStrategy : IClientAttackStrategy
     }
 
     public IEnumerable<(string Password, string Hash)> Process(long startIndex, long endIndex, HashSet<string> targetHashes, CancellationToken ct)
-        => HashWorker.ProcessDictionary(_wordList, startIndex, endIndex, targetHashes, ct);
+        => HashWorker.ProcessDictionary(_wordList, startIndex, endIndex, targetHashes);
 }

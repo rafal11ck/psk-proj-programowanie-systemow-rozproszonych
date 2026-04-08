@@ -23,15 +23,13 @@ public class TaskManager : ITaskManager
         InitializeTasks();
     }
 
-    private void InitializeTasks(long totalItems)
+    private void LoadWordList()
     {
-        for (var start = 0L; start < totalItems; start += _config.ChunkSize)
-        {
-            var lines = File.ReadAllLines(_config.WordListPath)
-                .Where(l => !string.IsNullOrWhiteSpace(l))
-                .Select(l => l.Trim());
-            _wordList.AddRange(lines);
-        }
+        if (_config.AttackMode != "dictionary") return;
+        if (string.IsNullOrEmpty(_config.WordListPath) || !File.Exists(_config.WordListPath)) return;
+        _wordList.AddRange(File.ReadAllLines(_config.WordListPath)
+            .Where(l => !string.IsNullOrWhiteSpace(l))
+            .Select(l => l.Trim()));
     }
 
     private void InitializeTasks()

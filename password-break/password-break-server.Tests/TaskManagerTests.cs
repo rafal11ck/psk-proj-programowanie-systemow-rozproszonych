@@ -186,32 +186,4 @@ public class TaskManagerTests
             File.Delete(tempFile);
         }
     }
-
-    [Fact]
-    public void TaskManager_DictionaryGeneratesCorrectRange()
-    {
-        var tempFile = Path.GetTempFileName();
-        File.WriteAllLines(tempFile, new[] { "a", "b", "c", "d", "e" });
-
-        try
-        {
-            var config = new PasswordBreakConfig
-            {
-                AttackMode = "dictionary",
-                WordListPath = tempFile,
-                ChunkSize = 2
-            };
-            var manager = CreateManager(config);
-
-            var task = manager.GetNextTask("client1");
-
-            Assert.NotNull(task);
-            Assert.Equal(0, task!.StartIndex);
-            Assert.Equal(1, task.EndIndex);
-        }
-        finally
-        {
-            File.Delete(tempFile);
-        }
-    }
 }

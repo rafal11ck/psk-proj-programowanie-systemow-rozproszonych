@@ -19,9 +19,12 @@ builder.Services.AddSingleton<FoundPasswords>(sp =>
     var config = sp.GetRequiredService<PasswordBreakConfig>();
     return new FoundPasswords(config.TargetHashes);
 });
+builder.Services.AddSingleton<IFoundPasswords>(sp => sp.GetRequiredService<FoundPasswords>());
 
-builder.Services.AddSingleton<ITaskManager, TaskManager>();
-builder.Services.AddSingleton<IClientTracker, ClientTracker>();
+builder.Services.AddSingleton<TaskManager>();
+builder.Services.AddSingleton<ITaskManager>(sp => sp.GetRequiredService<TaskManager>());
+builder.Services.AddSingleton<ClientTracker>();
+builder.Services.AddSingleton<IClientTracker>(sp => sp.GetRequiredService<ClientTracker>());
 builder.Services.AddSingleton<MonitorEventBroadcaster>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MonitorEventBroadcaster>());
 builder.Services.AddSingleton<ConsoleLoggingEventListener>();

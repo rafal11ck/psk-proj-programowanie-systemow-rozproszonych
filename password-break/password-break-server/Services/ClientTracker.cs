@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 
 namespace password_break_server.Services;
 
-public class ClientTracker
+public class ClientTracker : IClientTracker
 {
     private readonly ConcurrentDictionary<string, (DateTime LastSeen, string Ip)> _clients = new();
 
