@@ -10,6 +10,7 @@ public interface ITaskManager
     void MarkCompleted(string taskId);
     void MarkPending(string taskId);
     List<string> RequeueClientTasks(string clientId);
+    List<string> RequeueExpiredTasks(int timeoutSeconds);
     (int Completed, int Total, int Pending) GetProgress();
     List<TaskInfo> GetActiveTasks();
 }

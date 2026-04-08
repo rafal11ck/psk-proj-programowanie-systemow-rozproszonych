@@ -130,6 +130,29 @@ public class TaskManager : ITaskManager
         }
     }
 
+    public List<string> RequeueExpiredTasks(int timeoutSeconds)
+    {
+        if (timeoutSeconds <= 0) return [];
+
+        var now = DateTime.UtcNow;
+        lock (_lock)
+        {
+            var expired = _tasks.Values
+                .Where(t => t.Status == HashTaskStatus.InProgress
+                            && (now - t.StartedAt).TotalSeconds > timeoutSeconds)
+                .ToList();
+
+            foreach (var task in expired)
+            {
+                task.Status = HashTaskStatus.Pending;
+                task.ClientId = null;
+                _pendingTasks.Enqueue(task.TaskId);
+            }
+
+            return expired.Select(t => t.TaskId).ToList();
+        }
+    }
+
     public (int Completed, int Total, int Pending) GetProgress()
     {
         lock (_lock)

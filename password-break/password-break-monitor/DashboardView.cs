@@ -89,7 +89,6 @@ public class DashboardView : Window
         _workersData.Columns.Add("Client");
         _workersData.Columns.Add("IP");
         _workersData.Columns.Add("Last seen");
-        _workersData.Columns.Add("Timeout");
 
         _workersTable = new TableView
         {
@@ -219,7 +218,7 @@ public class DashboardView : Window
         // Workers — update rows in-place, keep same DataTable
         _workersData.Rows.Clear();
         foreach (var c in s.Clients)
-            _workersData.Rows.Add(c.ClientId, c.Ip, $"{c.SecondsAgo}s", $"{c.TimeoutRemaining}s");
+            _workersData.Rows.Add(c.ClientId, c.Ip, $"{c.SecondsAgo}s");
         ClampRowOffset(_workersTable, _workersData);
         _workersTable.SetNeedsDraw();
 

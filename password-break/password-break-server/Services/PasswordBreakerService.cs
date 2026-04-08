@@ -37,9 +37,12 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
         _clientTracker.Connect(clientId, clientIp);
         _events.ClientConnected(clientId, clientIp);
 
+        using var streamCts = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
+        var watchdog = StartHeartbeatWatchdog(clientId, streamCts);
+
         try
         {
-            await foreach (var message in requestStream.ReadAllAsync(context.CancellationToken))
+            await foreach (var message in requestStream.ReadAllAsync(streamCts.Token))
             {
                 currentTaskId = await HandleMessage(message, responseStream, clientId, currentTaskId);
             }
@@ -48,8 +51,38 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
         catch (OperationCanceledException) { }
         finally
         {
+            streamCts.Cancel();
+            try { await watchdog; } catch { }
             await Cleanup(clientId, currentTaskId);
         }
+    }
+
+    private Task StartHeartbeatWatchdog(string clientId, CancellationTokenSource streamCts)
+    {
+        var timeoutSeconds = _config.HeartbeatTimeoutSeconds;
+        if (timeoutSeconds <= 0) return Task.CompletedTask;
+
+        var pollInterval = TimeSpan.FromSeconds(Math.Max(1, timeoutSeconds / 4.0));
+
+        return Task.Run(async () =>
+        {
+            while (!streamCts.IsCancellationRequested)
+            {
+                try { await Task.Delay(pollInterval, streamCts.Token); }
+                catch (OperationCanceledException) { return; }
+
+                var lastSeen = _clientTracker.GetLastSeen(clientId);
+                if (lastSeen == null) return; // ktoś już nas posprzątał
+
+                var ago = (DateTime.UtcNow - lastSeen.Value).TotalSeconds;
+                if (ago > timeoutSeconds)
+                {
+                    // klient nie pinguje — ubij stream, Cleanup zrobi resztę
+                    streamCts.Cancel();
+                    return;
+                }
+            }
+        });
     }
 
     private async Task<string?> HandleMessage(
@@ -160,6 +193,7 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
     private string? HandleHeartbeat(Heartbeat heartbeat, string clientId)
     {
         _clientTracker.Heartbeat(clientId);
+        _events.ClientHeartbeat(clientId);
         return null;
     }
 

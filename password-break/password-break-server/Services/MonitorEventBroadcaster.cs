@@ -11,7 +11,6 @@ public class MonitorEventBroadcaster : IServerEventListener, IHostedService, IDi
     private readonly PasswordBreakConfig _config;
     private readonly List<Channel<MonitorEvent>> _subscribers = [];
     private readonly Lock _lock = new();
-    private Timer? _snapshotTimer;
 
     public MonitorEventBroadcaster(
         ITaskManager taskManager,
@@ -25,18 +24,9 @@ public class MonitorEventBroadcaster : IServerEventListener, IHostedService, IDi
         _config = config;
     }
 
-    public Task StartAsync(CancellationToken cancellationToken)
-    {
-        _snapshotTimer = new Timer(_ => BroadcastSnapshot(), null,
-            TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5));
-        return Task.CompletedTask;
-    }
+    public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-    public Task StopAsync(CancellationToken cancellationToken)
-    {
-        _snapshotTimer?.Change(Timeout.Infinite, 0);
-        return Task.CompletedTask;
-    }
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     public ChannelReader<MonitorEvent> Subscribe()
     {
@@ -69,14 +59,13 @@ public class MonitorEventBroadcaster : IServerEventListener, IHostedService, IDi
             AttackMode = _config.AttackMode
         };
 
-        foreach (var c in _clientTracker.GetClientStates(_config.HeartbeatTimeoutSeconds))
+        foreach (var c in _clientTracker.GetClientStates())
         {
             snapshot.Clients.Add(new ClientInfo
             {
                 ClientId = c.Id,
                 Ip = c.Ip,
-                SecondsAgo = c.Ago,
-                TimeoutRemaining = c.Timeout
+                LastSeenUnixMs = new DateTimeOffset(c.LastSeenUtc, TimeSpan.Zero).ToUnixTimeMilliseconds()
             });
         }
 
@@ -88,20 +77,11 @@ public class MonitorEventBroadcaster : IServerEventListener, IHostedService, IDi
                 ClientId = t.ClientId ?? "",
                 StartIndex = t.StartIndex,
                 EndIndex = t.EndIndex,
-                ElapsedSeconds = (int)(DateTime.UtcNow - t.StartedAt).TotalSeconds
+                StartedAtUnixMs = new DateTimeOffset(t.StartedAt, TimeSpan.Zero).ToUnixTimeMilliseconds()
             });
         }
 
         return snapshot;
-    }
-
-    private void BroadcastSnapshot()
-    {
-        lock (_lock)
-        {
-            if (_subscribers.Count == 0) return;
-        }
-        Broadcast(new MonitorEvent { Snapshot = BuildSnapshot() });
     }
 
     private void Broadcast(MonitorEvent evt)
@@ -116,7 +96,12 @@ public class MonitorEventBroadcaster : IServerEventListener, IHostedService, IDi
     public void ClientConnected(string clientId, string ip)
         => Broadcast(new MonitorEvent
         {
-            ClientConnected = new ClientConnectedEvent { ClientId = clientId, Ip = ip }
+            ClientConnected = new ClientConnectedEvent
+            {
+                ClientId = clientId,
+                Ip = ip,
+                LastSeenUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            }
         });
 
     public void ClientDisconnected(string clientId)
@@ -125,13 +110,24 @@ public class MonitorEventBroadcaster : IServerEventListener, IHostedService, IDi
             ClientDisconnected = new ClientDisconnectedEvent { ClientId = clientId }
         });
 
+    public void ClientHeartbeat(string clientId)
+        => Broadcast(new MonitorEvent
+        {
+            ClientHeartbeat = new ClientHeartbeatEvent
+            {
+                ClientId = clientId,
+                LastSeenUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            }
+        });
+
     public void LogTaskAssigned(string clientId, string taskId, long startIndex, long endIndex)
         => Broadcast(new MonitorEvent
         {
             TaskAssigned = new TaskAssignedEvent
             {
                 ClientId = clientId, TaskId = taskId,
-                StartIndex = startIndex, EndIndex = endIndex
+                StartIndex = startIndex, EndIndex = endIndex,
+                StartedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             }
         });
 
@@ -153,8 +149,5 @@ public class MonitorEventBroadcaster : IServerEventListener, IHostedService, IDi
             PasswordFound = new PasswordFoundEvent { Password = password, Hash = hash }
         });
 
-    public void Dispose()
-    {
-        _snapshotTimer?.Dispose();
-    }
+    public void Dispose() { }
 }

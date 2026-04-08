@@ -84,16 +84,19 @@ public class GrpcMonitorClient : IDisposable
                 _state.ApplySnapshot(evt.Snapshot);
                 break;
             case MonitorEvent.EventOneofCase.ClientConnected:
-                _state.OnClientConnected(evt.ClientConnected.ClientId, evt.ClientConnected.Ip);
+                _state.OnClientConnected(evt.ClientConnected.ClientId, evt.ClientConnected.Ip, evt.ClientConnected.LastSeenUnixMs);
                 _state.AddLog($"+ Client {evt.ClientConnected.ClientId} ({evt.ClientConnected.Ip}) connected");
                 break;
             case MonitorEvent.EventOneofCase.ClientDisconnected:
                 _state.OnClientDisconnected(evt.ClientDisconnected.ClientId);
                 _state.AddLog($"- Client {evt.ClientDisconnected.ClientId} disconnected");
                 break;
+            case MonitorEvent.EventOneofCase.ClientHeartbeat:
+                _state.OnClientHeartbeat(evt.ClientHeartbeat.ClientId, evt.ClientHeartbeat.LastSeenUnixMs);
+                break;
             case MonitorEvent.EventOneofCase.TaskAssigned:
                 _state.OnTaskAssigned(evt.TaskAssigned.TaskId, evt.TaskAssigned.ClientId,
-                    evt.TaskAssigned.StartIndex, evt.TaskAssigned.EndIndex);
+                    evt.TaskAssigned.StartIndex, evt.TaskAssigned.EndIndex, evt.TaskAssigned.StartedAtUnixMs);
                 _state.AddLog($"> Task {evt.TaskAssigned.TaskId} -> {evt.TaskAssigned.ClientId}");
                 break;
             case MonitorEvent.EventOneofCase.TaskCompleted:

@@ -37,6 +37,13 @@ var grpcClient = new GrpcMonitorClient(serverUrl, state, () =>
 
 var grpcTask = Task.Run(() => grpcClient.RunAsync(cts.Token));
 
+// Tick co 1s żeby liczniki "ile temu" się odświeżały lokalnie
+Application.AddTimeout(TimeSpan.FromSeconds(1), () =>
+{
+    dashboard.RefreshData();
+    return true;
+});
+
 // Handle Ctrl+C in Terminal.Gui (raw mode intercepts SIGINT)
 dashboard.KeyDown += (_, e) =>
 {

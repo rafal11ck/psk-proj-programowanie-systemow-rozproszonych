@@ -15,6 +15,11 @@ public class ConsoleLoggingEventListener : IServerEventListener
     public void ClientDisconnected(string clientId)
         => _logger.LogInformation("Client {ClientId} disconnected", clientId);
 
+    public void ClientHeartbeat(string clientId)
+    {
+        // celowo cisza — heartbeaty są zbyt szumne dla logu
+    }
+
     public void LogTaskAssigned(string clientId, string taskId, long startIndex, long endIndex)
         => _logger.LogInformation("Task {TaskId} assigned to {ClientId}", taskId, clientId);
 

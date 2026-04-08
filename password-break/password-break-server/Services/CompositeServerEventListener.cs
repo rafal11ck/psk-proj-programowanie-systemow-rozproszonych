@@ -31,6 +31,9 @@ public class CompositeServerEventListener : IServerEventListener
     public void ClientDisconnected(string clientId)
         => Dispatch(l => l.ClientDisconnected(clientId));
 
+    public void ClientHeartbeat(string clientId)
+        => Dispatch(l => l.ClientHeartbeat(clientId));
+
     public void LogTaskAssigned(string clientId, string taskId, long startIndex, long endIndex)
         => Dispatch(l => l.LogTaskAssigned(clientId, taskId, startIndex, endIndex));
 

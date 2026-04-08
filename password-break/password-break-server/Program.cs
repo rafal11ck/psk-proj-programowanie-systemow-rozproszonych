@@ -28,6 +28,7 @@ builder.Services.AddSingleton<IClientTracker>(sp => sp.GetRequiredService<Client
 builder.Services.AddSingleton<MonitorEventBroadcaster>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<MonitorEventBroadcaster>());
 builder.Services.AddSingleton<ConsoleLoggingEventListener>();
+builder.Services.AddHostedService<TaskTimeoutChecker>();
 builder.Services.AddSingleton<IServerEventListener>(sp =>
     new CompositeServerEventListener(
         new IServerEventListener[]
@@ -36,7 +37,6 @@ builder.Services.AddSingleton<IServerEventListener>(sp =>
             sp.GetRequiredService<MonitorEventBroadcaster>(),
         },
         sp.GetRequiredService<ILogger<CompositeServerEventListener>>()));
-builder.Services.AddHostedService<ExpiredTaskChecker>();
 
 var app = builder.Build();
 

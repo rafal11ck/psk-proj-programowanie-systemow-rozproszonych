@@ -18,6 +18,9 @@ public class ClientTracker : IClientTracker
             _clients[clientId] = (DateTime.UtcNow, info.Ip);
     }
 
+    public DateTime? GetLastSeen(string clientId)
+        => _clients.TryGetValue(clientId, out var info) ? info.LastSeen : null;
+
     public List<string> CleanupStaleClients(int timeoutSeconds)
     {
         var stale = new List<string>();
@@ -32,12 +35,10 @@ public class ClientTracker : IClientTracker
         return stale;
     }
 
-    public IReadOnlyList<(string Id, string Ip, int Ago, int Timeout)> GetClientStates(int heartbeatTimeout) =>
-        _clients.OrderBy(c => c.Key).Select(c =>
-        {
-            var ago = (int)(DateTime.UtcNow - c.Value.LastSeen).TotalSeconds;
-            return (c.Key, c.Value.Ip, ago, Math.Max(0, heartbeatTimeout - ago));
-        }).ToList();
+    public IReadOnlyList<(string Id, string Ip, DateTime LastSeenUtc)> GetClientStates() =>
+        _clients.OrderBy(c => c.Key)
+            .Select(c => (c.Key, c.Value.Ip, c.Value.LastSeen))
+            .ToList();
 
     public int Count => _clients.Count;
 }
