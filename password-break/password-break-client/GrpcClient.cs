@@ -89,17 +89,21 @@ public class GrpcClient : IAsyncDisposable
             {
                 Hello = new Hello { WordlistTimestamp = localTimestamp }
             }, ct);
+
             _logger.LogInformation("Connected, sending hello... (Ctrl+C to stop)");
 
-            await Task.WhenAny(heartbeatTask, receiverTask);
+            var completed = await Task.WhenAny(heartbeatTask, receiverTask);
+
+            if (completed == receiverTask)
+                await receiverTask;
+
+            if (completed == heartbeatTask)
+                await heartbeatTask;
         }
         finally
         {
             _isConnected = false;
             await connectionCts.CancelAsync();
-
-            try { await heartbeatTask; } catch { }
-            try { await receiverTask; } catch { }
 
             try { await _currentCall.RequestStream.CompleteAsync(); } catch { }
         }
@@ -110,6 +114,7 @@ public class GrpcClient : IAsyncDisposable
         _isConnected = false;
         _currentCall = null;
         _attackStrategy = null;
+        _currentTaskId = null;
     }
 
     public async ValueTask DisposeAsync()
@@ -123,25 +128,35 @@ public class GrpcClient : IAsyncDisposable
     {
         if (_currentCall == null || _attackStrategy == null) return;
 
-        var found = _attackStrategy.Process(task.StartIndex, task.EndIndex, _targetHashes, ct);
-
-        var result = new Result { TaskId = task.TaskId };
-        var count = 0;
-
-        foreach (var (password, hash) in found)
-        {
-            result.Found.Add(new FoundPassword { Password = password, Hash = hash });
-            count++;
-        }
-
         try
         {
+            var found = _attackStrategy.Process(task.StartIndex, task.EndIndex, _targetHashes, ct);
+
+            ct.ThrowIfCancellationRequested();
+
+            var result = new Result { TaskId = task.TaskId };
+            foreach (var (password, hash) in found)
+            {
+                result.Found.Add(new FoundPassword
+                {
+                    Password = password,
+                    Hash = hash
+                });
+            }
+
             await SendMessageAsync(new ClientMessage { Result = result }, ct);
-            Console.WriteLine($"[SENT] Task {task.TaskId}: found {count} password(s)");
+            _currentTaskId = null;
+            Console.WriteLine($"[SENT] Task {task.TaskId}: found {found.Count} password(s)");
+        }
+        catch (OperationCanceledException)
+        {
+            Console.WriteLine($"[CANCELLED] Task {task.TaskId} interrupted - result not sent");
+            throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to send result: {Message}", ex.Message);
+            _logger.LogError(ex, "Failed to process/send result for task {TaskId}", task.TaskId);
+            throw;
         }
     }
 
@@ -153,10 +168,14 @@ public class GrpcClient : IAsyncDisposable
             await Task.Delay(_heartbeatIntervalMs, ct);
             await SendMessageAsync(new ClientMessage { Ready = new Ready() }, ct);
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to request task: {Message}", ex.Message);
+            _logger.LogError(ex, "Failed to request next task");
+            throw;
         }
     }
 
@@ -181,6 +200,7 @@ public class GrpcClient : IAsyncDisposable
             try
             {
                 await Task.Delay(_heartbeatIntervalMs, ct);
+
                 if (_currentCall != null && _isConnected)
                 {
                     var taskId = _currentTaskId;
@@ -188,6 +208,7 @@ public class GrpcClient : IAsyncDisposable
                     {
                         Console.WriteLine($"[HEARTBEAT] Task {taskId} (interval: {_heartbeatIntervalMs}ms)");
                     }
+
                     await SendMessageAsync(new ClientMessage
                     {
                         Heartbeat = new Heartbeat()
@@ -215,16 +236,31 @@ public class GrpcClient : IAsyncDisposable
                 var localTimestamp = _wordlistManager.GetLocalTimestamp();
                 if (localTimestamp != config.WordlistTimestamp)
                 {
-                    try { await _wordlistManager.DownloadAsync(_serverUrl); }
-                    catch (Exception ex) { _logger.LogWarning("Could not download wordlist: {Message}", ex.Message); }
+                    try
+                    {
+                        await _wordlistManager.DownloadAsync(_serverUrl);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning("Could not download wordlist: {Message}", ex.Message);
+                    }
                 }
 
                 var wordList = _wordlistManager.Load();
                 return new DictionaryClientStrategy(wordList);
 
             case Config.AttackConfigOneofCase.BruteForce:
-                _logger.LogInformation("Mode: bruteforce, Charset: {Charset}, Length: {Min}-{Max}, Targets: {Count}", config.BruteForce.Charset, config.BruteForce.MinLength, config.BruteForce.MaxLength, config.TargetHashes.Count);
-                return new BruteForceClientStrategy(config.BruteForce.Charset, config.BruteForce.MinLength, config.BruteForce.MaxLength);
+                _logger.LogInformation(
+                    "Mode: bruteforce, Charset: {Charset}, Length: {Min}-{Max}, Targets: {Count}",
+                    config.BruteForce.Charset,
+                    config.BruteForce.MinLength,
+                    config.BruteForce.MaxLength,
+                    config.TargetHashes.Count);
+
+                return new BruteForceClientStrategy(
+                    config.BruteForce.Charset,
+                    config.BruteForce.MinLength,
+                    config.BruteForce.MaxLength);
 
             default:
                 throw new InvalidOperationException($"Unknown attack config: {config.AttackConfigCase}");
@@ -242,8 +278,10 @@ public class GrpcClient : IAsyncDisposable
                     case ServerMessage.MessageOneofCase.Config:
                         var config = message.Config;
                         _targetHashes = new HashSet<string>(config.TargetHashes, StringComparer.OrdinalIgnoreCase);
+
                         if (config.HeartbeatIntervalSeconds > 0)
                             _heartbeatIntervalMs = config.HeartbeatIntervalSeconds * 1000;
+
                         _attackStrategy = await CreateStrategy(config);
                         await SendMessageAsync(new ClientMessage { Ready = new Ready() }, ct);
                         break;
@@ -262,10 +300,14 @@ public class GrpcClient : IAsyncDisposable
                 }
             }
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
-            _logger.LogError("Receiver: {Message}", ex.Message);
+            _logger.LogError(ex, "Receiver loop failed");
+            throw;
         }
     }
 }
