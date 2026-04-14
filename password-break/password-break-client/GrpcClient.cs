@@ -1,6 +1,7 @@
 using Grpc.Core;
 using Grpc.Net.Client;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 
 namespace password_break_client;
 
@@ -130,11 +131,18 @@ public class GrpcClient : IAsyncDisposable
 
         try
         {
+            var stopwatch = Stopwatch.StartNew();
             var found = _attackStrategy.Process(task.StartIndex, task.EndIndex, _targetHashes, ct);
+            stopwatch.Stop();
 
             ct.ThrowIfCancellationRequested();
 
-            var result = new Result { TaskId = task.TaskId };
+            var result = new Result
+            {
+                TaskId = task.TaskId,
+                ComputeTimeMs = stopwatch.ElapsedMilliseconds
+            };
+
             foreach (var (password, hash) in found)
             {
                 result.Found.Add(new FoundPassword

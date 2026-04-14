@@ -76,9 +76,11 @@ public class TaskManager : ITaskManager
             var taskId = _pendingTasks.Dequeue();
             var task = _tasks[taskId];
 
+            var now = DateTime.UtcNow;
             task.Status = HashTaskStatus.InProgress;
             task.ClientId = clientId;
-            task.StartedAt = DateTime.UtcNow;
+            task.StartedAt = now;
+            task.SentAtUtc = now;
             return task;
         }
     }
@@ -180,7 +182,15 @@ public class TaskManager : ITaskManager
     {
         if (string.IsNullOrEmpty(_config.WordListPath) || !File.Exists(_config.WordListPath))
             return 0;
-        
+
         return new FileInfo(_config.WordListPath).LastWriteTimeUtc.Ticks;
+    }
+
+    public TaskInfo? GetTask(string taskId)
+    {
+        lock (_lock)
+        {
+            return _tasks.TryGetValue(taskId, out var task) ? task : null;
+        }
     }
 }

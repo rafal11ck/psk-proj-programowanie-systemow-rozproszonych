@@ -10,19 +10,23 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
     private readonly PasswordBreakConfig _config;
     private readonly IServerEventListener _events;
     private readonly ClientTracker _clientTracker;
+    private readonly object _metricsLock = new();
+    private const string MetricsFilePath = "metrics.csv";
 
     public PasswordBreakerService(
-        TaskManager taskManager,
-        FoundPasswords foundPasswords,
-        PasswordBreakConfig config,
-        IServerEventListener events,
-        ClientTracker clientTracker)
+    TaskManager taskManager,
+    FoundPasswords foundPasswords,
+    PasswordBreakConfig config,
+    IServerEventListener events,
+    ClientTracker clientTracker)
     {
         _taskManager = taskManager;
         _foundPasswords = foundPasswords;
         _config = config;
         _events = events;
         _clientTracker = clientTracker;
+
+        EnsureMetricsFileExists();
     }
 
     public override async Task Connect(
@@ -86,19 +90,30 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
     }
 
     private async Task<string?> HandleMessage(
-        ClientMessage message,
-        IServerStreamWriter<ServerMessage> responseStream,
-        string clientId,
-        string? currentTaskId)
+    ClientMessage message,
+    IServerStreamWriter<ServerMessage> responseStream,
+    string clientId,
+    string? currentTaskId)
     {
-        return message.MessageCase switch
+        switch (message.MessageCase)
         {
-            ClientMessage.MessageOneofCase.Hello => await HandleHello(responseStream),
-            ClientMessage.MessageOneofCase.Ready => await SendTask(responseStream, clientId),
-            ClientMessage.MessageOneofCase.Result => await HandleResult(message.Result, responseStream, clientId),
-            ClientMessage.MessageOneofCase.Heartbeat => HandleHeartbeat(message.Heartbeat, clientId),
-            _ => currentTaskId
-        };
+            case ClientMessage.MessageOneofCase.Hello:
+                await HandleHello(responseStream);
+                return currentTaskId;
+
+            case ClientMessage.MessageOneofCase.Ready:
+                return await SendTask(responseStream, clientId);
+
+            case ClientMessage.MessageOneofCase.Result:
+                return await HandleResult(message.Result, responseStream, clientId);
+
+            case ClientMessage.MessageOneofCase.Heartbeat:
+                HandleHeartbeat(message.Heartbeat, clientId);
+                return currentTaskId;
+
+            default:
+                return currentTaskId;
+        }
     }
 
     private async Task<string?> HandleHello(IServerStreamWriter<ServerMessage> responseStream)
@@ -151,6 +166,7 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
         };
         hashTask.TargetHashes.AddRange(_taskManager.TargetHashes);
 
+        task.SentAtUtc = DateTime.UtcNow;
         await responseStream.WriteAsync(new ServerMessage { HashTask = hashTask });
         _events.LogTaskAssigned(clientId, task.TaskId, task.StartIndex, task.EndIndex);
 
@@ -158,10 +174,18 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
     }
 
     private async Task<string?> HandleResult(
-        Result result,
-        IServerStreamWriter<ServerMessage> responseStream,
-        string clientId)
+    Result result,
+    IServerStreamWriter<ServerMessage> responseStream,
+    string clientId)
     {
+        var task = _taskManager.GetTask(result.TaskId);
+        var t4Utc = DateTime.UtcNow;
+
+        if (task != null)
+        {
+            SaveMetrics(task, clientId, result, t4Utc);
+        }
+
         StoreResults(result.Found);
         _taskManager.MarkCompleted(result.TaskId);
         _events.LogTaskCompleted(result.TaskId);
@@ -209,5 +233,43 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
         }
 
         return Task.CompletedTask;
+    }
+
+    private void EnsureMetricsFileExists()
+    {
+        lock (_metricsLock)
+        {
+            if (!File.Exists(MetricsFilePath) || new FileInfo(MetricsFilePath).Length == 0)
+            {
+                File.WriteAllText(
+                    MetricsFilePath,
+                    "task_id,client_id,start_index,end_index,compute_time_ms,communication_time_ms,total_time_ms,found_count,t1_utc,t4_utc"
+                    + Environment.NewLine);
+            }
+        }
+    }
+
+    private void SaveMetrics(TaskInfo task, string clientId, Result result, DateTime t4Utc)
+    {
+        var totalTimeMs = (long)(t4Utc - task.SentAtUtc).TotalMilliseconds;
+        var computeTimeMs = result.ComputeTimeMs;
+        var communicationTimeMs = Math.Max(0, totalTimeMs - computeTimeMs);
+
+        var line = string.Join(",",
+            task.TaskId,
+            clientId,
+            task.StartIndex,
+            task.EndIndex,
+            computeTimeMs,
+            communicationTimeMs,
+            totalTimeMs,
+            result.Found.Count,
+            task.SentAtUtc.ToString("HH:mm:ss.fff"),
+            t4Utc.ToString("HH:mm:ss.fff"));
+
+        lock (_metricsLock)
+        {
+            File.AppendAllText(MetricsFilePath, line + Environment.NewLine);
+        }
     }
 }

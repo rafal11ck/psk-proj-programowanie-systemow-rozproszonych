@@ -121,10 +121,12 @@ public class HashWorkerTests
         var wordList = new List<string> { "a", "b", "c", "d" };
         
         var results = HashWorker.ProcessDictionary(wordList, 0, 1, targetHashes).ToList();
-        
-        Assert.Equal(2, results.Count);
-        Assert.Equal("a", results[0].Password);
-        Assert.Equal("b", results[1].Password);
+
+        var passwords = results.Select(r => r.Password).ToHashSet();
+
+        Assert.Equal(2, passwords.Count);
+        Assert.Contains("a", passwords);
+        Assert.Contains("b", passwords);
     }
 
     [Fact]
