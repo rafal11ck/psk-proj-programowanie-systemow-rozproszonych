@@ -10,6 +10,7 @@ public class GrpcClient : IAsyncDisposable
     private readonly string _serverUrl;
     private readonly IWordlistManager _wordlistManager;
     private readonly ILogger<GrpcClient> _logger;
+    private readonly int? _maxDegreeOfParallelism;
     private readonly CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private string? _currentTaskId;
@@ -19,11 +20,16 @@ public class GrpcClient : IAsyncDisposable
     private IClientAttackStrategy? _attackStrategy;
     private HashSet<string> _targetHashes = new(StringComparer.OrdinalIgnoreCase);
 
-    public GrpcClient(string serverUrl, IWordlistManager wordlistManager, ILogger<GrpcClient> logger)
+    public GrpcClient(
+        string serverUrl,
+        IWordlistManager wordlistManager,
+        ILogger<GrpcClient> logger,
+        int? maxDegreeOfParallelism = null)
     {
         _serverUrl = serverUrl;
         _wordlistManager = wordlistManager;
         _logger = logger;
+        _maxDegreeOfParallelism = maxDegreeOfParallelism;
 
         Console.CancelKeyPress += (_, e) =>
         {
@@ -255,7 +261,7 @@ public class GrpcClient : IAsyncDisposable
                 }
 
                 var wordList = _wordlistManager.Load();
-                return new DictionaryClientStrategy(wordList);
+                return new DictionaryClientStrategy(wordList, _maxDegreeOfParallelism);
 
             case Config.AttackConfigOneofCase.BruteForce:
                 _logger.LogInformation(
@@ -268,8 +274,8 @@ public class GrpcClient : IAsyncDisposable
                 return new BruteForceClientStrategy(
                     config.BruteForce.Charset,
                     config.BruteForce.MinLength,
-                    config.BruteForce.MaxLength);
-
+                    config.BruteForce.MaxLength,
+                    _maxDegreeOfParallelism);
             default:
                 throw new InvalidOperationException($"Unknown attack config: {config.AttackConfigCase}");
         }
