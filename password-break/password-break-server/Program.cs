@@ -43,11 +43,19 @@ var app = builder.Build();
 app.MapGrpcService<PasswordBreakerService>();
 app.MapGrpcService<MonitorGrpcService>();
 app.MapGet("/", () => "Password Breaker gRPC Server");
-app.MapGet("/wordlist", (PasswordBreakConfig cfg) =>
+app.MapGet("/wordlist", (PasswordBreakConfig cfg, IWebHostEnvironment env) =>
 {
-    if (string.IsNullOrEmpty(cfg.WordListPath) || !File.Exists(cfg.WordListPath))
+    if (string.IsNullOrWhiteSpace(cfg.WordListPath))
         return Results.NotFound();
-    return Results.File(cfg.WordListPath, "text/plain");
+
+    var fullPath = Path.IsPathRooted(cfg.WordListPath)
+        ? cfg.WordListPath
+        : Path.Combine(env.ContentRootPath, cfg.WordListPath);
+
+    if (!File.Exists(fullPath))
+        return Results.NotFound();
+
+    return Results.File(File.OpenRead(fullPath), "text/plain");
 });
 
 var foundPasswords = app.Services.GetRequiredService<IFoundPasswords>();

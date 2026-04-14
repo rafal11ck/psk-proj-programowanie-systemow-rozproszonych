@@ -29,7 +29,7 @@ public class WordlistManager : IWordlistManager
     public async Task DownloadAsync(string serverUrl)
     {
         var uri = new Uri(serverUrl);
-        var wordlistUrl = $"{uri.Scheme}://{uri.Host}:{uri.Port}/wordlist";
+        var wordlistUrl = $"{uri.Scheme}://{uri.Host}:8081/wordlist";
 
         var content = await SharedHttpClient.GetStringAsync(wordlistUrl);
 
