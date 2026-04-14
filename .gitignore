@@ -23,3 +23,4 @@ Thumbs.db
 *.sln.docstates
 password-break/password-break-server/results.csv
 password-break/password-break-server/metrics.csv
+password-break/password-break-wordlist-generator/wordlist.txt
