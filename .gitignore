@@ -24,3 +24,12 @@ Thumbs.db
 password-break/password-break-server/results.csv
 password-break/password-break-server/metrics.csv
 password-break/password-break-wordlist-generator/wordlist.txt
+
+# Experiment outputs
+password-break/password-break-server/experiments/
+password-break/password-break-server/charts/
+password-break/password-break-server/comparison_charts/
+
+# Python
+__pycache__/
+*.pyc

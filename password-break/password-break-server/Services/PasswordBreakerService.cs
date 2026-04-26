@@ -11,7 +11,11 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
     private readonly IServerEventListener _events;
     private readonly ClientTracker _clientTracker;
     private readonly object _metricsLock = new();
-    private const string MetricsFilePath = "metrics.csv";
+    private readonly string _experimentDir;
+    private readonly string _metricsFilePath;
+    private readonly string _resultsFilePath;
+    private readonly string _serverMachineName = Environment.MachineName;
+    private readonly DateTime _runStartedAtUtc = DateTime.UtcNow;
 
     public PasswordBreakerService(
     TaskManager taskManager,
@@ -25,6 +29,19 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
         _config = config;
         _events = events;
         _clientTracker = clientTracker;
+
+        var safeExperimentName = MakeSafeFileName(_config.ExperimentName);
+        var experimentFolderName = $"{safeExperimentName}_{DateTime.Now:yyyyMMdd_HHmmss}";
+
+        _experimentDir = Path.Combine("experiments", experimentFolderName);
+        Directory.CreateDirectory(_experimentDir);
+
+        _metricsFilePath = Path.Combine(_experimentDir, "metrics.csv");
+        _resultsFilePath = Path.Combine(_experimentDir, "results.csv");
+
+        Console.WriteLine($"Experiment directory: {_experimentDir}");
+        Console.WriteLine($"Metrics file: {_metricsFilePath}");
+        Console.WriteLine($"Results file: {_resultsFilePath}");
 
         EnsureMetricsFileExists();
     }
@@ -187,13 +204,18 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
         }
 
         StoreResults(result.Found);
+
+        if (result.Found.Count > 0)
+        {
+            _foundPasswords.SaveToFile(_resultsFilePath);
+        }
+
         _taskManager.MarkCompleted(result.TaskId);
         _events.LogTaskCompleted(result.TaskId);
 
         if (_foundPasswords.AllFound)
         {
-            if (!_foundPasswords.Saved)
-                _foundPasswords.SaveToFile("results.csv");
+            _foundPasswords.SaveToFile(_resultsFilePath);
 
             await responseStream.WriteAsync(new ServerMessage
             {
@@ -235,15 +257,28 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
         return Task.CompletedTask;
     }
 
+    private static string MakeSafeFileName(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "experiment";
+
+        foreach (var invalidChar in Path.GetInvalidFileNameChars())
+        {
+            value = value.Replace(invalidChar, '_');
+        }
+
+        return value.Trim();
+    }
+
     private void EnsureMetricsFileExists()
     {
         lock (_metricsLock)
         {
-            if (!File.Exists(MetricsFilePath) || new FileInfo(MetricsFilePath).Length == 0)
+            if (!File.Exists(_metricsFilePath) || new FileInfo(_metricsFilePath).Length == 0)
             {
                 File.WriteAllText(
-                    MetricsFilePath,
-                    "task_id,client_id,start_index,end_index,compute_time_ms,communication_time_ms,total_time_ms,found_count,t1_utc,t4_utc"
+                    _metricsFilePath,
+                    "run_id,experiment_name,server_machine,attack_mode,chunk_size,min_length,max_length,charset_length,target_hashes_count,clients_count,client_threads,task_id,client_id,start_index,end_index,candidates_count,compute_time_ms,communication_time_ms,total_time_ms,throughput_candidates_per_sec,found_count,run_started_at_utc,task_sent_at_utc,result_received_at_utc"
                     + Environment.NewLine);
             }
         }
@@ -251,25 +286,42 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
 
     private void SaveMetrics(TaskInfo task, string clientId, Result result, DateTime t4Utc)
     {
-        var totalTimeMs = (long)(t4Utc - task.SentAtUtc).TotalMilliseconds;
-        var computeTimeMs = result.ComputeTimeMs;
+        var totalTimeMs = Math.Max(1, (long)(t4Utc - task.SentAtUtc).TotalMilliseconds);
+        var computeTimeMs = Math.Max(1, result.ComputeTimeMs);
         var communicationTimeMs = Math.Max(0, totalTimeMs - computeTimeMs);
 
+        var candidatesCount = task.EndIndex - task.StartIndex + 1;
+        var throughput = candidatesCount / (computeTimeMs / 1000.0);
+
         var line = string.Join(",",
+            _config.RunId,
+            _config.ExperimentName,
+            _serverMachineName,
+            _config.AttackMode,
+            _config.ChunkSize,
+            _config.MinLength,
+            _config.MaxLength,
+            _config.CharSet.Length,
+            _config.TargetHashes.Count,
+            _config.ClientsCount,
+            _config.ClientThreads,
             task.TaskId,
             clientId,
             task.StartIndex,
             task.EndIndex,
+            candidatesCount,
             computeTimeMs,
             communicationTimeMs,
             totalTimeMs,
+            throughput.ToString("F2", System.Globalization.CultureInfo.InvariantCulture),
             result.Found.Count,
-            task.SentAtUtc.ToString("HH:mm:ss.fff"),
-            t4Utc.ToString("HH:mm:ss.fff"));
+            _runStartedAtUtc.ToString("O"),
+            task.SentAtUtc.ToString("O"),
+            t4Utc.ToString("O"));
 
         lock (_metricsLock)
         {
-            File.AppendAllText(MetricsFilePath, line + Environment.NewLine);
+            File.AppendAllText(_metricsFilePath, line + Environment.NewLine);
         }
     }
 }

@@ -26,6 +26,7 @@ public class FoundPasswords : IFoundPasswords
                 {
                     _found.TryAdd(hash, password);
                     _remainingHashes.Remove(hash);
+                    _saved = false;
                 }
             }
             nowAllFound = !wasAll && _remainingHashes.Count == 0;
@@ -66,10 +67,12 @@ public class FoundPasswords : IFoundPasswords
     {
         lock (_lock)
         {
-            if (_saved) return;
-            _saved = true;
-            var lines = _found.Select(kvp => $"{kvp.Value},{kvp.Key}");
+            var lines = _found
+                .OrderBy(kvp => kvp.Value)
+                .Select(kvp => $"{kvp.Value},{kvp.Key}");
+
             File.WriteAllLines(filePath, lines.Prepend("password,hash"));
+            _saved = true;
         }
     }
 }

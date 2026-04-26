@@ -22,4 +22,8 @@ public class PasswordBreakConfig
     /// </summary>
     public int TaskTimeoutSeconds { get; set; } = 300;
     public List<string> TargetHashes { get; set; } = [];
+    public string RunId { get; set; } = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
+    public string ExperimentName { get; set; } = "default";
+    public int ClientsCount { get; set; } = 1;
+    public int ClientThreads { get; set; } = 0;
 }
