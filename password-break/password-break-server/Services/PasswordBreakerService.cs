@@ -11,12 +11,9 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
     private readonly IServerEventListener _events;
     private readonly ClientTracker _clientTracker;
     private readonly ServerRunState _runState;
+    private readonly ExperimentRunManager _runManager;
     private readonly object _metricsLock = new();
-    private readonly string _experimentDir;
-    private readonly string _metricsFilePath;
-    private readonly string _resultsFilePath;
     private readonly string _serverMachineName = Environment.MachineName;
-    private readonly DateTime _runStartedAtUtc = DateTime.UtcNow;
 
     public PasswordBreakerService(
         TaskManager taskManager,
@@ -24,7 +21,8 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
         PasswordBreakConfig config,
         IServerEventListener events,
         ClientTracker clientTracker,
-        ServerRunState runState)
+        ServerRunState runState,
+        ExperimentRunManager runManager)
     {
         _taskManager = taskManager;
         _foundPasswords = foundPasswords;
@@ -32,21 +30,7 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
         _events = events;
         _clientTracker = clientTracker;
         _runState = runState;
-
-        var safeExperimentName = MakeSafeFileName(_config.ExperimentName);
-        var experimentFolderName = $"{safeExperimentName}_{DateTime.Now:yyyyMMdd_HHmmss}";
-
-        _experimentDir = Path.Combine("experiments", experimentFolderName);
-        Directory.CreateDirectory(_experimentDir);
-
-        _metricsFilePath = Path.Combine(_experimentDir, "metrics.csv");
-        _resultsFilePath = Path.Combine(_experimentDir, "results.csv");
-
-        Console.WriteLine($"Experiment directory: {_experimentDir}");
-        Console.WriteLine($"Metrics file: {_metricsFilePath}");
-        Console.WriteLine($"Results file: {_resultsFilePath}");
-
-        EnsureMetricsFileExists();
+        _runManager = runManager;
     }
 
     public override async Task Connect(
@@ -71,12 +55,24 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
                 currentTaskId = await HandleMessage(message, responseStream, clientId, currentTaskId);
             }
         }
-        catch (IOException) { }
-        catch (OperationCanceledException) { }
+        catch (IOException)
+        {
+        }
+        catch (OperationCanceledException)
+        {
+        }
         finally
         {
             streamCts.Cancel();
-            try { await watchdog; } catch { }
+
+            try
+            {
+                await watchdog;
+            }
+            catch
+            {
+            }
+
             await Cleanup(clientId, currentTaskId);
         }
     }
@@ -84,7 +80,9 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
     private Task StartHeartbeatWatchdog(string clientId, CancellationTokenSource streamCts)
     {
         var timeoutSeconds = _config.HeartbeatTimeoutSeconds;
-        if (timeoutSeconds <= 0) return Task.CompletedTask;
+
+        if (timeoutSeconds <= 0)
+            return Task.CompletedTask;
 
         var pollInterval = TimeSpan.FromSeconds(Math.Max(1, timeoutSeconds / 4.0));
 
@@ -92,13 +90,22 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
         {
             while (!streamCts.IsCancellationRequested)
             {
-                try { await Task.Delay(pollInterval, streamCts.Token); }
-                catch (OperationCanceledException) { return; }
+                try
+                {
+                    await Task.Delay(pollInterval, streamCts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
 
                 var lastSeen = _clientTracker.GetLastSeen(clientId);
-                if (lastSeen == null) return;
+
+                if (lastSeen == null)
+                    return;
 
                 var ago = (DateTime.UtcNow - lastSeen.Value).TotalSeconds;
+
                 if (ago > timeoutSeconds)
                 {
                     streamCts.Cancel();
@@ -127,7 +134,7 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
                 return await HandleResult(message.Result, responseStream, clientId);
 
             case ClientMessage.MessageOneofCase.Heartbeat:
-                HandleHeartbeat(message.Heartbeat, clientId);
+                HandleHeartbeat(clientId);
                 return currentTaskId;
 
             default:
@@ -143,6 +150,7 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
             WordlistTimestamp = _taskManager.GetWordListTimestamp(),
             HeartbeatIntervalSeconds = _config.HeartbeatIntervalSeconds
         };
+
         config.TargetHashes.AddRange(_config.TargetHashes);
 
         switch (_config.AttackMode)
@@ -150,6 +158,7 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
             case "dictionary":
                 config.Dictionary = new DictionaryConfig { WordlistPath = _config.WordListPath ?? "" };
                 break;
+
             default:
                 config.BruteForce = new BruteForceConfig
                 {
@@ -176,7 +185,19 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
             return null;
         }
 
-        var task = _taskManager.GetNextTask(clientId);
+        var run = _runManager.Current;
+
+        if (run == null || !run.IsOpen)
+        {
+            await responseStream.WriteAsync(new ServerMessage
+            {
+                Ack = new Ack { Message = "Run is not active" }
+            });
+
+            return null;
+        }
+
+        var task = _taskManager.GetNextTask(clientId, run.Sequence);
 
         if (task == null)
         {
@@ -184,6 +205,7 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
             {
                 Ack = new Ack { Message = "No more tasks" }
             });
+
             return null;
         }
 
@@ -193,10 +215,13 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
             StartIndex = task.StartIndex,
             EndIndex = task.EndIndex
         };
+
         hashTask.TargetHashes.AddRange(_taskManager.TargetHashes);
 
         task.SentAtUtc = DateTime.UtcNow;
+
         await responseStream.WriteAsync(new ServerMessage { HashTask = hashTask });
+
         _events.LogTaskAssigned(clientId, task.TaskId, task.StartIndex, task.EndIndex);
 
         return task.TaskId;
@@ -209,17 +234,25 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
     {
         var task = _taskManager.GetTask(result.TaskId);
         var t4Utc = DateTime.UtcNow;
+        var run = _runManager.Current;
 
-        if (task != null)
+        if (task == null || run == null || !run.IsOpen || task.RunSequence != run.Sequence)
         {
-            SaveMetrics(task, clientId, result, t4Utc);
+            await responseStream.WriteAsync(new ServerMessage
+            {
+                Ack = new Ack { Message = "Result ignored - run is not active" }
+            });
+
+            return null;
         }
+
+        SaveMetrics(task, clientId, result, t4Utc, run);
 
         StoreResults(result.Found);
 
         if (result.Found.Count > 0)
         {
-            _foundPasswords.SaveToFile(_resultsFilePath);
+            _foundPasswords.SaveToFile(run.ResultsFilePath);
         }
 
         _taskManager.MarkCompleted(result.TaskId);
@@ -227,12 +260,13 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
 
         if (_foundPasswords.AllFound)
         {
-            _foundPasswords.SaveToFile(_resultsFilePath);
+            _foundPasswords.SaveToFile(run.ResultsFilePath);
 
             await responseStream.WriteAsync(new ServerMessage
             {
                 Ack = new Ack { Message = "All passwords found" }
             });
+
             return null;
         }
 
@@ -248,11 +282,10 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
             _events.LogFound(f.Password, f.Hash);
     }
 
-    private string? HandleHeartbeat(Heartbeat heartbeat, string clientId)
+    private void HandleHeartbeat(string clientId)
     {
         _clientTracker.Heartbeat(clientId);
         _events.ClientHeartbeat(clientId);
-        return null;
     }
 
     private Task Cleanup(string clientId, string? currentTaskId)
@@ -269,34 +302,7 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
         return Task.CompletedTask;
     }
 
-    private static string MakeSafeFileName(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return "experiment";
-
-        foreach (var invalidChar in Path.GetInvalidFileNameChars())
-        {
-            value = value.Replace(invalidChar, '_');
-        }
-
-        return value.Trim();
-    }
-
-    private void EnsureMetricsFileExists()
-    {
-        lock (_metricsLock)
-        {
-            if (!File.Exists(_metricsFilePath) || new FileInfo(_metricsFilePath).Length == 0)
-            {
-                File.WriteAllText(
-                    _metricsFilePath,
-                    "run_id,experiment_name,server_machine,attack_mode,chunk_size,min_length,max_length,charset_length,target_hashes_count,clients_count,client_threads,task_id,client_id,start_index,end_index,candidates_count,compute_time_ms,communication_time_ms,total_time_ms,throughput_candidates_per_sec,found_count,run_started_at_utc,task_sent_at_utc,result_received_at_utc"
-                    + Environment.NewLine);
-            }
-        }
-    }
-
-    private void SaveMetrics(TaskInfo task, string clientId, Result result, DateTime t4Utc)
+    private void SaveMetrics(TaskInfo task, string clientId, Result result, DateTime t4Utc, ExperimentRun run)
     {
         var totalTimeMs = Math.Max(1, (long)(t4Utc - task.SentAtUtc).TotalMilliseconds);
         var computeTimeMs = Math.Max(1, result.ComputeTimeMs);
@@ -304,10 +310,14 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
 
         var candidatesCount = task.EndIndex - task.StartIndex + 1;
         var throughput = candidatesCount / (computeTimeMs / 1000.0);
+        var connectedClientsAtResult = _clientTracker.Count;
 
         var line = string.Join(",",
-            _config.RunId,
-            _config.ExperimentName,
+            run.RunId,
+            run.ExperimentName,
+            run.Sequence,
+            run.StartedAtUtc.ToString("O"),
+            run.PausedAtUtc?.ToString("O") ?? "",
             _serverMachineName,
             _config.AttackMode,
             _config.ChunkSize,
@@ -316,6 +326,8 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
             _config.CharSet.Length,
             _config.TargetHashes.Count,
             _config.ClientsCount,
+            run.ConnectedClientsAtStart,
+            connectedClientsAtResult,
             _config.ClientThreads,
             task.TaskId,
             clientId,
@@ -327,13 +339,12 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
             totalTimeMs,
             throughput.ToString("F2", System.Globalization.CultureInfo.InvariantCulture),
             result.Found.Count,
-            _runStartedAtUtc.ToString("O"),
             task.SentAtUtc.ToString("O"),
             t4Utc.ToString("O"));
 
         lock (_metricsLock)
         {
-            File.AppendAllText(_metricsFilePath, line + Environment.NewLine);
+            File.AppendAllText(run.MetricsFilePath, line + Environment.NewLine);
         }
     }
 }

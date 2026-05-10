@@ -6,7 +6,8 @@ public interface ITaskManager
 {
     IReadOnlyList<string> TargetHashes { get; }
     long GetWordListTimestamp();
-    TaskInfo? GetNextTask(string clientId);
+    TaskInfo? GetNextTask(string clientId, int runSequence);
+    TaskInfo? GetTask(string taskId);
     void MarkCompleted(string taskId);
     void MarkPending(string taskId);
     List<string> RequeueClientTasks(string clientId);

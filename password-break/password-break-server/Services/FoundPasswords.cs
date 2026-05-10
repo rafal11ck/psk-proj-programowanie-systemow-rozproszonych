@@ -3,7 +3,8 @@ namespace password_break_server.Services;
 public class FoundPasswords : IFoundPasswords
 {
     private readonly Dictionary<string, string> _found = new();
-    private readonly HashSet<string> _remainingHashes;
+    private readonly List<string> _targetHashesSource;
+    private HashSet<string> _remainingHashes;
     private readonly Lock _lock = new();
     private bool _saved;
 
@@ -11,15 +12,18 @@ public class FoundPasswords : IFoundPasswords
 
     public FoundPasswords(IEnumerable<string> targetHashes)
     {
-        _remainingHashes = new HashSet<string>(targetHashes, StringComparer.OrdinalIgnoreCase);
+        _targetHashesSource = targetHashes.ToList();
+        _remainingHashes = new HashSet<string>(_targetHashesSource, StringComparer.OrdinalIgnoreCase);
     }
 
     public void StoreFound(IEnumerable<(string Password, string Hash)> entries)
     {
         bool nowAllFound;
+
         lock (_lock)
         {
             var wasAll = _remainingHashes.Count == 0;
+
             foreach (var (password, hash) in entries)
             {
                 if (_remainingHashes.Contains(hash))
@@ -29,10 +33,22 @@ public class FoundPasswords : IFoundPasswords
                     _saved = false;
                 }
             }
+
             nowAllFound = !wasAll && _remainingHashes.Count == 0;
         }
+
         if (nowAllFound)
             OnAllFound?.Invoke();
+    }
+
+    public void Reset()
+    {
+        lock (_lock)
+        {
+            _found.Clear();
+            _remainingHashes = new HashSet<string>(_targetHashesSource, StringComparer.OrdinalIgnoreCase);
+            _saved = false;
+        }
     }
 
     public bool AllFound

@@ -4,6 +4,7 @@ public interface IFoundPasswords
 {
     event Action? OnAllFound;
     void StoreFound(IEnumerable<(string Password, string Hash)> entries);
+    void Reset();
     bool AllFound { get; }
     bool Saved { get; }
     int FoundCount { get; }

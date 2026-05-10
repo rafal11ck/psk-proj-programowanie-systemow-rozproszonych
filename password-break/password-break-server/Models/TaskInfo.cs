@@ -10,6 +10,7 @@ public enum HashTaskStatus
 public class TaskInfo
 {
     public string TaskId { get; set; } = string.Empty;
+    public int RunSequence { get; set; }
     public HashTaskStatus Status { get; set; } = HashTaskStatus.Pending;
     public string? ClientId { get; set; }
     public DateTime StartedAt { get; set; }

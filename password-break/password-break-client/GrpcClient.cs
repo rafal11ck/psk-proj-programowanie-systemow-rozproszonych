@@ -217,7 +217,7 @@ public class GrpcClient : IAsyncDisposable
     {
         try
         {
-            await Task.Delay(500, ct);
+            await Task.Delay(50, ct);
             await SendMessageAsync(new ClientMessage { Ready = new Ready() }, ct);
         }
         catch (OperationCanceledException)
