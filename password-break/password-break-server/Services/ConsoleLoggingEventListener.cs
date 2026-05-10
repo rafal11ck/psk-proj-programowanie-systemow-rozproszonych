@@ -17,14 +17,15 @@ public class ConsoleLoggingEventListener : IServerEventListener
 
     public void ClientHeartbeat(string clientId)
     {
-        // celowo cisza — heartbeaty są zbyt szumne dla logu
     }
 
     public void LogTaskAssigned(string clientId, string taskId, long startIndex, long endIndex)
-        => _logger.LogInformation("Task {TaskId} assigned to {ClientId}", taskId, clientId);
+    {
+    }
 
     public void LogTaskCompleted(string taskId)
-        => _logger.LogInformation("Task {TaskId} completed", taskId);
+    {
+    }
 
     public void LogTaskRequeued(string taskId)
         => _logger.LogWarning("Task {TaskId} requeued", taskId);

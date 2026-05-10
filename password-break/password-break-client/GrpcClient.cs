@@ -177,10 +177,13 @@ public class GrpcClient : IAsyncDisposable
             await SendMessageAsync(new ClientMessage { Result = result }, ct);
             _currentTaskId = null;
 
-            _logger.LogInformation(
-                "Task {TaskId} completed, found {FoundCount} password(s)",
-                task.TaskId,
-                found.Count);
+            if (found.Count > 0)
+            {
+                _logger.LogInformation(
+                    "Task {TaskId} completed, found {FoundCount} password(s)",
+                    task.TaskId,
+                    found.Count);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -317,13 +320,6 @@ public class GrpcClient : IAsyncDisposable
 
                     case ServerMessage.MessageOneofCase.HashTask:
                         _lastAckMessage = null;
-
-                        _logger.LogInformation(
-                            "Task received: {TaskId} ({StartIndex}-{EndIndex})",
-                            message.HashTask.TaskId,
-                            message.HashTask.StartIndex,
-                            message.HashTask.EndIndex);
-
                         _currentTaskId = message.HashTask.TaskId;
                         _targetHashes = new HashSet<string>(message.HashTask.TargetHashes, StringComparer.OrdinalIgnoreCase);
                         await ProcessAndSendResult(message.HashTask, ct);
