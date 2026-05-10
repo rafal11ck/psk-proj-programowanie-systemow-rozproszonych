@@ -47,9 +47,21 @@ public class GrpcClient : IAsyncDisposable
             {
                 await ConnectAndProcess();
             }
+            catch (OperationCanceledException) when (_cts.Token.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (RpcException ex) when (!_cts.Token.IsCancellationRequested)
+            {
+                _logger.LogWarning("Connection lost: {Message}", GetShortErrorMessage(ex));
+            }
+            catch (HttpRequestException ex) when (!_cts.Token.IsCancellationRequested)
+            {
+                _logger.LogWarning("Connection lost: {Message}", GetShortErrorMessage(ex));
+            }
             catch (Exception ex) when (!_cts.Token.IsCancellationRequested)
             {
-                _logger.LogWarning("Connection lost: {Message}", ex.Message);
+                _logger.LogWarning("Connection lost: {Message}", GetShortErrorMessage(ex));
             }
             finally
             {
@@ -187,12 +199,16 @@ public class GrpcClient : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
-            _logger.LogWarning("Task {TaskId} interrupted - result not sent", task.TaskId);
+            _logger.LogWarning("Task {TaskId} interrupted", task.TaskId);
             throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to process/send result for task {TaskId}", task.TaskId);
+            _logger.LogWarning(
+                "Task {TaskId} failed: {Message}",
+                task.TaskId,
+                GetShortErrorMessage(ex));
+
             throw;
         }
     }
@@ -210,7 +226,7 @@ public class GrpcClient : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to request next task");
+            _logger.LogWarning("Could not request next task: {Message}", GetShortErrorMessage(ex));
             throw;
         }
     }
@@ -252,7 +268,7 @@ public class GrpcClient : IAsyncDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogError("Heartbeat failed: {Message}", ex.Message);
+                _logger.LogWarning("Heartbeat failed: {Message}", GetShortErrorMessage(ex));
             }
         }
     }
@@ -273,7 +289,7 @@ public class GrpcClient : IAsyncDisposable
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning("Could not download wordlist: {Message}", ex.Message);
+                        _logger.LogWarning("Could not download wordlist: {Message}", GetShortErrorMessage(ex));
                     }
                 }
 
@@ -341,10 +357,29 @@ public class GrpcClient : IAsyncDisposable
         {
             throw;
         }
+        catch (RpcException ex)
+        {
+            throw new InvalidOperationException(GetShortErrorMessage(ex));
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Receiver loop failed");
-            throw;
+            throw new InvalidOperationException(GetShortErrorMessage(ex));
         }
+    }
+
+    private static string GetShortErrorMessage(Exception ex)
+    {
+        if (ex is RpcException rpcException)
+        {
+            return rpcException.StatusCode switch
+            {
+                StatusCode.Unavailable => "server unavailable",
+                StatusCode.Cancelled => "connection cancelled",
+                StatusCode.Unknown => "connection closed",
+                _ => rpcException.Status.Detail
+            };
+        }
+
+        return ex.InnerException?.Message ?? ex.Message;
     }
 }
