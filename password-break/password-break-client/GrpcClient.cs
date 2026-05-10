@@ -19,6 +19,7 @@ public class GrpcClient : IAsyncDisposable
     private AsyncDuplexStreamingCall<ClientMessage, ServerMessage>? _currentCall;
     private IClientAttackStrategy? _attackStrategy;
     private HashSet<string> _targetHashes = new(StringComparer.OrdinalIgnoreCase);
+    private string? _lastAckMessage;
 
     public GrpcClient(
         string serverUrl,
@@ -55,11 +56,18 @@ public class GrpcClient : IAsyncDisposable
                 ResetState();
             }
 
-            if (_cts.Token.IsCancellationRequested) break;
+            if (_cts.Token.IsCancellationRequested)
+                break;
 
-            _logger.LogInformation("Reconnecting in {Seconds}s...", _heartbeatIntervalMs / 1000);
-            try { await Task.Delay(_heartbeatIntervalMs, _cts.Token); }
-            catch (OperationCanceledException) { }
+            _logger.LogInformation("Reconnecting in 2s...");
+
+            try
+            {
+                await Task.Delay(2000, _cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+            }
         }
 
         _logger.LogInformation("Shutdown complete");
@@ -97,7 +105,7 @@ public class GrpcClient : IAsyncDisposable
                 Hello = new Hello { WordlistTimestamp = localTimestamp }
             }, ct);
 
-            _logger.LogInformation("Connected, sending hello... (Ctrl+C to stop)");
+            _logger.LogInformation("Connected, waiting for server start... (Ctrl+C to stop)");
 
             var completed = await Task.WhenAny(heartbeatTask, receiverTask);
 
@@ -112,7 +120,13 @@ public class GrpcClient : IAsyncDisposable
             _isConnected = false;
             await connectionCts.CancelAsync();
 
-            try { await _currentCall.RequestStream.CompleteAsync(); } catch { }
+            try
+            {
+                await _currentCall.RequestStream.CompleteAsync();
+            }
+            catch
+            {
+            }
         }
     }
 
@@ -122,6 +136,7 @@ public class GrpcClient : IAsyncDisposable
         _currentCall = null;
         _attackStrategy = null;
         _currentTaskId = null;
+        _lastAckMessage = null;
     }
 
     public async ValueTask DisposeAsync()
@@ -133,7 +148,8 @@ public class GrpcClient : IAsyncDisposable
 
     private async Task ProcessAndSendResult(HashTask task, CancellationToken ct)
     {
-        if (_currentCall == null || _attackStrategy == null) return;
+        if (_currentCall == null || _attackStrategy == null)
+            return;
 
         try
         {
@@ -160,11 +176,15 @@ public class GrpcClient : IAsyncDisposable
 
             await SendMessageAsync(new ClientMessage { Result = result }, ct);
             _currentTaskId = null;
-            Console.WriteLine($"[SENT] Task {task.TaskId}: found {found.Count} password(s)");
+
+            _logger.LogInformation(
+                "Task {TaskId} completed, found {FoundCount} password(s)",
+                task.TaskId,
+                found.Count);
         }
         catch (OperationCanceledException)
         {
-            Console.WriteLine($"[CANCELLED] Task {task.TaskId} interrupted - result not sent");
+            _logger.LogWarning("Task {TaskId} interrupted - result not sent", task.TaskId);
             throw;
         }
         catch (Exception ex)
@@ -178,8 +198,7 @@ public class GrpcClient : IAsyncDisposable
     {
         try
         {
-            Console.WriteLine("[CLIENT] Waiting for next task...");
-            await Task.Delay(_heartbeatIntervalMs, ct);
+            await Task.Delay(500, ct);
             await SendMessageAsync(new ClientMessage { Ready = new Ready() }, ct);
         }
         catch (OperationCanceledException)
@@ -196,6 +215,7 @@ public class GrpcClient : IAsyncDisposable
     private async Task SendMessageAsync(ClientMessage message, CancellationToken ct)
     {
         await _writeLock.WaitAsync(ct);
+
         try
         {
             if (_currentCall != null && _isConnected)
@@ -217,12 +237,6 @@ public class GrpcClient : IAsyncDisposable
 
                 if (_currentCall != null && _isConnected)
                 {
-                    var taskId = _currentTaskId;
-                    if (taskId != null)
-                    {
-                        Console.WriteLine($"[HEARTBEAT] Task {taskId} (interval: {_heartbeatIntervalMs}ms)");
-                    }
-
                     await SendMessageAsync(new ClientMessage
                     {
                         Heartbeat = new Heartbeat()
@@ -276,6 +290,7 @@ public class GrpcClient : IAsyncDisposable
                     config.BruteForce.MinLength,
                     config.BruteForce.MaxLength,
                     _maxDegreeOfParallelism);
+
             default:
                 throw new InvalidOperationException($"Unknown attack config: {config.AttackConfigCase}");
         }
@@ -301,14 +316,26 @@ public class GrpcClient : IAsyncDisposable
                         break;
 
                     case ServerMessage.MessageOneofCase.HashTask:
-                        Console.WriteLine($"[TASK] Received: {message.HashTask.TaskId} (range {message.HashTask.StartIndex}-{message.HashTask.EndIndex})");
+                        _lastAckMessage = null;
+
+                        _logger.LogInformation(
+                            "Task received: {TaskId} ({StartIndex}-{EndIndex})",
+                            message.HashTask.TaskId,
+                            message.HashTask.StartIndex,
+                            message.HashTask.EndIndex);
+
                         _currentTaskId = message.HashTask.TaskId;
                         _targetHashes = new HashSet<string>(message.HashTask.TargetHashes, StringComparer.OrdinalIgnoreCase);
                         await ProcessAndSendResult(message.HashTask, ct);
                         break;
 
                     case ServerMessage.MessageOneofCase.Ack:
-                        _logger.LogInformation("Ack: {Message}", message.Ack.Message);
+                        if (_lastAckMessage != message.Ack.Message)
+                        {
+                            _logger.LogInformation("Ack: {Message}", message.Ack.Message);
+                            _lastAckMessage = message.Ack.Message;
+                        }
+
                         await RequestTaskAfterDelay(ct);
                         break;
                 }

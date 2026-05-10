@@ -7,6 +7,8 @@ builder.Host.ConfigureHostOptions(o => o.ShutdownTimeout = TimeSpan.FromSeconds(
 
 builder.Services.AddGrpc();
 
+builder.Services.AddSingleton<ServerRunState>();
+
 builder.Services.AddSingleton(_ =>
 {
     var config = new PasswordBreakConfig();
@@ -59,6 +61,54 @@ app.MapGet("/wordlist", (PasswordBreakConfig cfg, IWebHostEnvironment env) =>
 });
 
 var foundPasswords = app.Services.GetRequiredService<IFoundPasswords>();
+var runState = app.Services.GetRequiredService<ServerRunState>();
+
+runState.StateChanged += isRunning =>
+{
+    Console.WriteLine();
+    Console.WriteLine(isRunning
+        ? "[SERVER] START - clients can receive tasks"
+        : "[SERVER] PAUSE - new tasks will not be assigned");
+    Console.WriteLine();
+};
+
+Console.WriteLine();
+Console.WriteLine("====================================================");
+Console.WriteLine(" Password Breaker Server");
+Console.WriteLine(" SPACJA  - start/pause clients");
+Console.WriteLine(" CTRL+C  - stop server and save results");
+Console.WriteLine(" Current state: PAUSE");
+Console.WriteLine("====================================================");
+Console.WriteLine();
+
+var keyboardTask = Task.Run(async () =>
+{
+    while (!app.Lifetime.ApplicationStopping.IsCancellationRequested)
+    {
+        try
+        {
+            if (!Console.IsInputRedirected && Console.KeyAvailable)
+            {
+                var key = Console.ReadKey(intercept: true);
+
+                if (key.Key == ConsoleKey.Spacebar)
+                {
+                    runState.Toggle();
+                }
+            }
+
+            await Task.Delay(50, app.Lifetime.ApplicationStopping);
+        }
+        catch (OperationCanceledException)
+        {
+            break;
+        }
+        catch
+        {
+            await Task.Delay(500);
+        }
+    }
+});
 
 foundPasswords.OnAllFound += () => SaveResults(foundPasswords);
 
@@ -77,7 +127,9 @@ static void SaveResults(IFoundPasswords found)
 {
     if (found.FoundCount > 0 && !found.Saved)
         found.SaveToFile("results.csv");
+
     if (found.FoundCount > 0)
         Console.WriteLine($"Results saved to results.csv ({found.FoundCount} password{(found.FoundCount > 1 ? "s" : "")} found)");
+
     Console.WriteLine("Server stopped.");
 }

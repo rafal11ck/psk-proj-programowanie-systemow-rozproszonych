@@ -10,6 +10,7 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
     private readonly PasswordBreakConfig _config;
     private readonly IServerEventListener _events;
     private readonly ClientTracker _clientTracker;
+    private readonly ServerRunState _runState;
     private readonly object _metricsLock = new();
     private readonly string _experimentDir;
     private readonly string _metricsFilePath;
@@ -18,17 +19,19 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
     private readonly DateTime _runStartedAtUtc = DateTime.UtcNow;
 
     public PasswordBreakerService(
-    TaskManager taskManager,
-    FoundPasswords foundPasswords,
-    PasswordBreakConfig config,
-    IServerEventListener events,
-    ClientTracker clientTracker)
+        TaskManager taskManager,
+        FoundPasswords foundPasswords,
+        PasswordBreakConfig config,
+        IServerEventListener events,
+        ClientTracker clientTracker,
+        ServerRunState runState)
     {
         _taskManager = taskManager;
         _foundPasswords = foundPasswords;
         _config = config;
         _events = events;
         _clientTracker = clientTracker;
+        _runState = runState;
 
         var safeExperimentName = MakeSafeFileName(_config.ExperimentName);
         var experimentFolderName = $"{safeExperimentName}_{DateTime.Now:yyyyMMdd_HHmmss}";
@@ -93,12 +96,11 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
                 catch (OperationCanceledException) { return; }
 
                 var lastSeen = _clientTracker.GetLastSeen(clientId);
-                if (lastSeen == null) return; // ktoś już nas posprzątał
+                if (lastSeen == null) return;
 
                 var ago = (DateTime.UtcNow - lastSeen.Value).TotalSeconds;
                 if (ago > timeoutSeconds)
                 {
-                    // klient nie pinguje — ubij stream, Cleanup zrobi resztę
                     streamCts.Cancel();
                     return;
                 }
@@ -107,10 +109,10 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
     }
 
     private async Task<string?> HandleMessage(
-    ClientMessage message,
-    IServerStreamWriter<ServerMessage> responseStream,
-    string clientId,
-    string? currentTaskId)
+        ClientMessage message,
+        IServerStreamWriter<ServerMessage> responseStream,
+        string clientId,
+        string? currentTaskId)
     {
         switch (message.MessageCase)
         {
@@ -164,8 +166,18 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
 
     private async Task<string?> SendTask(IServerStreamWriter<ServerMessage> responseStream, string clientId)
     {
+        if (!_runState.IsRunning)
+        {
+            await responseStream.WriteAsync(new ServerMessage
+            {
+                Ack = new Ack { Message = "Waiting for server start" }
+            });
+
+            return null;
+        }
+
         var task = _taskManager.GetNextTask(clientId);
-        
+
         if (task == null)
         {
             await responseStream.WriteAsync(new ServerMessage
@@ -191,9 +203,9 @@ public class PasswordBreakerService : PasswordBreaker.PasswordBreakerBase
     }
 
     private async Task<string?> HandleResult(
-    Result result,
-    IServerStreamWriter<ServerMessage> responseStream,
-    string clientId)
+        Result result,
+        IServerStreamWriter<ServerMessage> responseStream,
+        string clientId)
     {
         var task = _taskManager.GetTask(result.TaskId);
         var t4Utc = DateTime.UtcNow;
