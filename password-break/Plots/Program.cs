@@ -16,7 +16,9 @@ Directory.CreateDirectory(outputDir);
 var rows = Directory
     .GetFiles(experimentsDir, "metrics.csv", SearchOption.AllDirectories)
     .SelectMany(ReadMetrics)
+    .Where(r => r.TaskSentAtUtc != DateTime.MinValue)
     .Where(r => r.ResultReceivedAtUtc != DateTime.MinValue)
+    .Where(r => r.CandidatesCount > 0)
     .ToList();
 
 if (rows.Count == 0)
@@ -25,13 +27,15 @@ if (rows.Count == 0)
     return;
 }
 
-SaveThroughputOverTime(rows, outputDir);
-SaveAverageThroughputByClients(rows, outputDir);
-SaveAverageThroughputByThreads(rows, outputDir);
-SaveAverageThroughputByChunkSize(rows, outputDir);
-SaveRunSummaryThroughput(rows, outputDir);
+var runs = BuildRunSummaries(rows);
 
-Console.WriteLine($"Plots saved to:");
+SaveThroughputOverTime(rows, outputDir);
+SaveTotalThroughputByClients(runs, outputDir);
+SaveTotalThroughputByThreads(runs, outputDir);
+SaveTotalThroughputByChunkSize(runs, outputDir);
+SaveRunSummaryThroughput(runs, outputDir);
+
+Console.WriteLine("Plots saved to:");
 Console.WriteLine(outputDir);
 
 static string FindRepoRoot()
@@ -97,6 +101,36 @@ static List<MetricRow> ReadMetrics(string path)
     return result;
 }
 
+static List<RunSummary> BuildRunSummaries(List<MetricRow> rows)
+{
+    return rows
+        .GroupBy(r => r.ExperimentName)
+        .Select(g =>
+        {
+            var ordered = g.OrderBy(r => r.TaskSentAtUtc).ToList();
+
+            var start = ordered.Min(r => r.TaskSentAtUtc);
+            var end = ordered.Max(r => r.ResultReceivedAtUtc);
+            var seconds = Math.Max(0.001, (end - start).TotalSeconds);
+            var candidates = ordered.Sum(r => r.CandidatesCount);
+
+            return new RunSummary
+            {
+                ExperimentName = g.Key,
+                RunSequence = ordered.Min(r => r.RunSequence),
+                ChunkSize = ordered.First().ChunkSize,
+                ClientThreads = ordered.First().ClientThreads,
+                ConnectedClientsAtStart = ordered.Max(r => r.ConnectedClientsAtStart),
+                CandidatesCount = candidates,
+                DurationSeconds = seconds,
+                TotalThroughput = candidates / seconds
+            };
+        })
+        .OrderBy(r => r.RunSequence)
+        .ThenBy(r => r.ExperimentName)
+        .ToList();
+}
+
 static void SaveThroughputOverTime(List<MetricRow> rows, string outputDir)
 {
     var plot = new Plot();
@@ -109,6 +143,7 @@ static void SaveThroughputOverTime(List<MetricRow> rows, string outputDir)
             continue;
 
         var start = ordered.Min(r => r.ResultReceivedAtUtc);
+
         var xs = ordered
             .Select(r => (r.ResultReceivedAtUtc - start).TotalSeconds)
             .ToArray();
@@ -120,94 +155,84 @@ static void SaveThroughputOverTime(List<MetricRow> rows, string outputDir)
         plot.Add.Scatter(xs, ys).LegendText = run.Key;
     }
 
-    plot.Title("Throughput over time");
+    plot.Title("Task throughput over time");
     plot.XLabel("Seconds from run start");
-    plot.YLabel("Candidates / second");
+    plot.YLabel("Task candidates / second");
     plot.ShowLegend();
 
     plot.SavePng(Path.Combine(outputDir, "throughput_over_time.png"), 1600, 900);
 }
 
-static void SaveAverageThroughputByClients(List<MetricRow> rows, string outputDir)
+static void SaveTotalThroughputByClients(List<RunSummary> runs, string outputDir)
 {
-    var points = rows
+    var points = runs
         .GroupBy(r => r.ConnectedClientsAtStart)
         .OrderBy(g => g.Key)
         .Select(g => new
         {
             X = (double)g.Key,
-            Y = g.Average(r => r.Throughput)
+            Y = g.Average(r => r.TotalThroughput)
         })
         .ToList();
 
     SaveScatter(
         points.Select(p => p.X).ToArray(),
         points.Select(p => p.Y).ToArray(),
-        "Average throughput vs clients",
+        "Total throughput vs clients",
         "Connected clients",
-        "Average candidates / second",
-        Path.Combine(outputDir, "avg_throughput_by_clients.png"));
+        "Total candidates / second",
+        Path.Combine(outputDir, "total_throughput_by_clients.png"));
 }
 
-static void SaveAverageThroughputByThreads(List<MetricRow> rows, string outputDir)
+static void SaveTotalThroughputByThreads(List<RunSummary> runs, string outputDir)
 {
-    var points = rows
+    var points = runs
         .GroupBy(r => r.ClientThreads)
         .OrderBy(g => g.Key)
         .Select(g => new
         {
             X = (double)g.Key,
-            Y = g.Average(r => r.Throughput)
+            Y = g.Average(r => r.TotalThroughput)
         })
         .ToList();
 
     SaveScatter(
         points.Select(p => p.X).ToArray(),
         points.Select(p => p.Y).ToArray(),
-        "Average throughput vs client threads",
-        "Client threads",
-        "Average candidates / second",
-        Path.Combine(outputDir, "avg_throughput_by_threads.png"));
+        "Total throughput vs client threads",
+        "Client threads, 0 = all available",
+        "Total candidates / second",
+        Path.Combine(outputDir, "total_throughput_by_threads.png"));
 }
 
-static void SaveAverageThroughputByChunkSize(List<MetricRow> rows, string outputDir)
+static void SaveTotalThroughputByChunkSize(List<RunSummary> runs, string outputDir)
 {
-    var points = rows
+    var points = runs
         .GroupBy(r => r.ChunkSize)
         .OrderBy(g => g.Key)
         .Select(g => new
         {
             X = (double)g.Key,
-            Y = g.Average(r => r.Throughput)
+            Y = g.Average(r => r.TotalThroughput)
         })
         .ToList();
 
     SaveScatter(
         points.Select(p => p.X).ToArray(),
         points.Select(p => p.Y).ToArray(),
-        "Average throughput vs chunk size",
+        "Total throughput vs chunk size",
         "Chunk size",
-        "Average candidates / second",
-        Path.Combine(outputDir, "avg_throughput_by_chunk_size.png"));
+        "Total candidates / second",
+        Path.Combine(outputDir, "total_throughput_by_chunk_size.png"));
 }
 
-static void SaveRunSummaryThroughput(List<MetricRow> rows, string outputDir)
+static void SaveRunSummaryThroughput(List<RunSummary> runs, string outputDir)
 {
-    var points = rows
-        .GroupBy(r => r.ExperimentName)
-        .OrderBy(g => g.Min(r => r.RunSequence))
-        .Select((g, i) =>
+    var points = runs
+        .Select((r, i) => new
         {
-            var start = g.Min(r => r.TaskSentAtUtc);
-            var end = g.Max(r => r.ResultReceivedAtUtc);
-            var seconds = Math.Max(0.001, (end - start).TotalSeconds);
-            var throughput = g.Sum(r => r.CandidatesCount) / seconds;
-
-            return new
-            {
-                X = (double)(i + 1),
-                Y = throughput
-            };
+            X = (double)(i + 1),
+            Y = r.TotalThroughput
         })
         .ToList();
 
@@ -216,7 +241,7 @@ static void SaveRunSummaryThroughput(List<MetricRow> rows, string outputDir)
         points.Select(p => p.Y).ToArray(),
         "Total run throughput",
         "Run number",
-        "Candidates / second",
+        "Total candidates / second",
         Path.Combine(outputDir, "run_summary_throughput.png"));
 }
 
@@ -236,6 +261,12 @@ static void SaveScatter(
     plot.Title(title);
     plot.XLabel(xLabel);
     plot.YLabel(yLabel);
+
+    plot.Axes.Bottom.TickGenerator = new ScottPlot.TickGenerators.NumericAutomatic
+    {
+        MinimumTickSpacing = 80,
+        IntegerTicksOnly = true
+    };
 
     plot.SavePng(path, 1400, 800);
 }
@@ -283,4 +314,16 @@ class MetricRow
     public int FoundCount { get; set; }
     public DateTime TaskSentAtUtc { get; set; }
     public DateTime ResultReceivedAtUtc { get; set; }
+}
+
+class RunSummary
+{
+    public string ExperimentName { get; set; } = "";
+    public int RunSequence { get; set; }
+    public long ChunkSize { get; set; }
+    public int ClientThreads { get; set; }
+    public int ConnectedClientsAtStart { get; set; }
+    public long CandidatesCount { get; set; }
+    public double DurationSeconds { get; set; }
+    public double TotalThroughput { get; set; }
 }
