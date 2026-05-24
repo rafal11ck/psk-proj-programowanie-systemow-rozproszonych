@@ -20,10 +20,10 @@ public class TaskManagerTests
         };
         var manager = new TaskManager(config, CreateFoundPasswords());
 
-        var task = manager.GetNextTask("client1");
+        var task = manager.GetNextTask("client1", 1);
 
         Assert.NotNull(task);
-        Assert.Equal("0_2", task.TaskId);
+        Assert.Equal("run1_0_2", task.TaskId);
         Assert.Equal(0, task.StartIndex);
         Assert.Equal(2, task.EndIndex);
     }
@@ -41,9 +41,9 @@ public class TaskManagerTests
         };
         var manager = new TaskManager(config, CreateFoundPasswords());
 
-        manager.GetNextTask("client1");
-        manager.MarkCompleted("0_0");
-        var task = manager.GetNextTask("client2");
+        manager.GetNextTask("client1", 1);
+        manager.MarkCompleted("run1_0_0");
+        var task = manager.GetNextTask("client2", 1);
 
         Assert.Null(task);
     }
@@ -61,7 +61,7 @@ public class TaskManagerTests
         };
         var manager = new TaskManager(config, CreateFoundPasswords());
 
-        var task = manager.GetNextTask("client123");
+        var task = manager.GetNextTask("client123", 1);
 
         Assert.Equal("client123", task!.ClientId);
         Assert.Equal(HashTaskStatus.InProgress, task.Status);
@@ -80,10 +80,10 @@ public class TaskManagerTests
         };
         var manager = new TaskManager(config, CreateFoundPasswords());
 
-        var task = manager.GetNextTask("client1");
+        var task = manager.GetNextTask("client1", 1);
         manager.MarkCompleted(task!.TaskId);
 
-        var nextTask = manager.GetNextTask("client2");
+        var nextTask = manager.GetNextTask("client2", 1);
         Assert.Null(nextTask);
     }
 
@@ -100,10 +100,10 @@ public class TaskManagerTests
         };
         var manager = new TaskManager(config, CreateFoundPasswords());
 
-        var task1 = manager.GetNextTask("client1");
+        var task1 = manager.GetNextTask("client1", 1);
         manager.MarkPending(task1!.TaskId);
 
-        var task2 = manager.GetNextTask("client2");
+        var task2 = manager.GetNextTask("client2", 1);
 
         Assert.NotNull(task2);
         Assert.Equal(task1.TaskId, task2!.TaskId);
@@ -125,13 +125,13 @@ public class TaskManagerTests
             };
             var manager = new TaskManager(config, CreateFoundPasswords());
 
-            var task1 = manager.GetNextTask("client1");
-            var task2 = manager.GetNextTask("client2");
+            var task1 = manager.GetNextTask("client1", 1);
+            var task2 = manager.GetNextTask("client2", 1);
 
             Assert.NotNull(task1);
             Assert.NotNull(task2);
-            Assert.Equal("0_1", task1!.TaskId);
-            Assert.Equal("2_2", task2!.TaskId);
+            Assert.Equal("run1_0_1", task1!.TaskId);
+            Assert.Equal("run1_2_2", task2!.TaskId);
         }
         finally
         {
@@ -152,7 +152,7 @@ public class TaskManagerTests
         };
         var manager = new TaskManager(config, CreateFoundPasswords());
 
-        var task = manager.GetNextTask("client1");
+        var task = manager.GetNextTask("client1", 1);
 
         Assert.NotNull(task);
         Assert.Equal(0, task!.StartIndex);
@@ -175,7 +175,7 @@ public class TaskManagerTests
             };
             var manager = new TaskManager(config, CreateFoundPasswords());
 
-            var task = manager.GetNextTask("client1");
+            var task = manager.GetNextTask("client1", 1);
 
             Assert.NotNull(task);
             Assert.Equal(0, task!.StartIndex);
