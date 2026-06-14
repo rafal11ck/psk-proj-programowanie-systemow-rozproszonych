@@ -1,0 +1,31 @@
+@startuml
+title Protokół komunikacji klient--serwer (gRPC Connect)
+skinparam dpi 150
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+hide footbox
+
+participant "Klient" as C
+participant "Serwer" as S
+
+C  ->  S : Hello(wordlist_timestamp)
+S -->  C : Config(tryb ataku, target hashe, interwał HB)
+note over C: buduje strategię ataku;\new. pobiera słownik (HTTP :8081)
+
+C  ->  S : Ready
+S -->  C : Ack "Waiting for server start"  (stan PAUSE)
+note over S: operator naciska SPACJĘ\nserwer przechodzi w stan RUNNING
+
+C  ->  S : Ready
+S -->  C : HashTask(task_id, start_index, end_index)
+
+loop dopóki są zadania
+  note over C: oblicza SHA-256 dla zakresu\n(wielowątkowo), mierzy compute_time_ms
+  C  ->  S : Result(task_id, found[], compute_time_ms)
+  note over S: MarkCompleted, zapis metryk (t4)
+  S -->  C : HashTask(kolejny zakres)
+end
+
+C  ->  S : Heartbeat  (cyklicznie, w tle)
+S -->  C : Ack "All passwords found" / "No more tasks"
+@enduml

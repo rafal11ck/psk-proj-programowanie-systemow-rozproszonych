@@ -31,3 +31,15 @@ password-break/password-break-server/experiments/*
 
 
 
+
+# LaTeX / sprawozdanie - artefakty budowania
+docs/sprawozdanie-koncowe/_minted/
+docs/sprawozdanie-koncowe/*.aux
+docs/sprawozdanie-koncowe/*.fls
+docs/sprawozdanie-koncowe/*.fdb_latexmk
+docs/sprawozdanie-koncowe/*.log
+docs/sprawozdanie-koncowe/*.out
+docs/sprawozdanie-koncowe/*.toc
+docs/sprawozdanie-koncowe/*.xdv
+docs/sprawozdanie-koncowe/*.synctex.gz
+docs/sprawozdanie-koncowe/*.minted

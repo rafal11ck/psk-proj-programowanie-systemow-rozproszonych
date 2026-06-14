@@ -1,0 +1,34 @@
+version: '3'
+
+vars:
+  REPORT: docs/sprawozdanie-koncowe
+  DIAG: docs/sprawozdanie-koncowe/diagramy
+
+tasks:
+  default:
+    desc: Lista dostępnych zadań
+    cmds:
+      - task --list
+
+  diagrams:
+    desc: Renderuj diagram sekwencji protokołu (.puml -> PNG)
+    cmds:
+      - plantuml -tpng {{.DIAG}}/protokol.puml
+
+  report:
+    desc: Skompiluj sprawozdanie końcowe do PDF (XeLaTeX + minted)
+    dir: '{{.REPORT}}'
+    cmds:
+      - latexmk -xelatex -shell-escape -interaction=nonstopmode sprawozdanie-koncowe.tex
+
+  report:clean:
+    desc: Usuń pliki pomocnicze LaTeX
+    dir: '{{.REPORT}}'
+    cmds:
+      - latexmk -C sprawozdanie-koncowe.tex
+
+  sprawozdanie:
+    desc: Pełna regeneracja - diagramy + kompilacja PDF
+    cmds:
+      - task: diagrams
+      - task: report
