@@ -35,6 +35,11 @@ SaveTotalThroughputByThreads(runs, outputDir);
 SaveTotalThroughputByChunkSize(runs, outputDir);
 SaveRunSummaryThroughput(runs, outputDir);
 
+SaveThroughputByGranularityAndClients(runs, outputDir);
+SaveGranularityPlotsPerClientCount(runs, outputDir);
+SaveClientPlotsPerGranularity(runs, outputDir);
+SaveRunSummaryCsv(runs, outputDir);
+
 Console.WriteLine("Plots saved to:");
 Console.WriteLine(outputDir);
 
@@ -114,18 +119,27 @@ static List<RunSummary> BuildRunSummaries(List<MetricRow> rows)
             var seconds = Math.Max(0.001, (end - start).TotalSeconds);
             var candidates = ordered.Sum(r => r.CandidatesCount);
 
+            var clients = ordered.Max(r => Math.Max(
+                r.ConnectedClientsAtStart,
+                r.ConnectedClientsAtResult));
+
+            var chunkSize = ordered.First().ChunkSize;
+
             return new RunSummary
             {
                 ExperimentName = g.Key,
                 RunSequence = ordered.Min(r => r.RunSequence),
-                ChunkSize = ordered.First().ChunkSize,
+                ChunkSize = chunkSize,
                 ClientThreads = ordered.First().ClientThreads,
-                ConnectedClientsAtStart = ordered.Max(r => r.ConnectedClientsAtStart),
+                ConnectedClients = clients,
+                GranularityPerClient = clients > 0 ? (double)chunkSize / clients : 0,
                 CandidatesCount = candidates,
                 DurationSeconds = seconds,
                 TotalThroughput = candidates / seconds
             };
         })
+        .Where(r => r.ConnectedClients > 0)
+        .Where(r => r.GranularityPerClient > 0)
         .OrderBy(r => r.RunSequence)
         .ThenBy(r => r.ExperimentName)
         .ToList();
@@ -166,7 +180,7 @@ static void SaveThroughputOverTime(List<MetricRow> rows, string outputDir)
 static void SaveTotalThroughputByClients(List<RunSummary> runs, string outputDir)
 {
     var points = runs
-        .GroupBy(r => r.ConnectedClientsAtStart)
+        .GroupBy(r => r.ConnectedClients)
         .OrderBy(g => g.Key)
         .Select(g => new
         {
@@ -245,6 +259,113 @@ static void SaveRunSummaryThroughput(List<RunSummary> runs, string outputDir)
         Path.Combine(outputDir, "run_summary_throughput.png"));
 }
 
+static void SaveThroughputByGranularityAndClients(List<RunSummary> runs, string outputDir)
+{
+    var plot = new Plot();
+
+    foreach (var group in runs.GroupBy(r => r.ConnectedClients).OrderBy(g => g.Key))
+    {
+        var points = group
+            .GroupBy(r => r.GranularityPerClient)
+            .OrderBy(g => g.Key)
+            .Select(g => new
+            {
+                X = g.Key,
+                Y = g.Average(r => r.TotalThroughput)
+            })
+            .ToList();
+
+        if (points.Count == 0)
+            continue;
+
+        plot.Add.Scatter(
+            points.Select(p => p.X).ToArray(),
+            points.Select(p => p.Y).ToArray())
+            .LegendText = $"{group.Key} clients";
+    }
+
+    plot.Title("Throughput vs granularity per client");
+    plot.XLabel("Granularity per client = chunk size / clients");
+    plot.YLabel("Total candidates / second");
+    plot.ShowLegend();
+
+    plot.SavePng(Path.Combine(outputDir, "throughput_by_granularity_and_clients.png"), 1600, 900);
+}
+
+static void SaveGranularityPlotsPerClientCount(List<RunSummary> runs, string outputDir)
+{
+    foreach (var group in runs.GroupBy(r => r.ConnectedClients).OrderBy(g => g.Key))
+    {
+        var points = group
+            .GroupBy(r => r.GranularityPerClient)
+            .OrderBy(g => g.Key)
+            .Select(g => new
+            {
+                X = g.Key,
+                Y = g.Average(r => r.TotalThroughput)
+            })
+            .ToList();
+
+        SaveScatter(
+            points.Select(p => p.X).ToArray(),
+            points.Select(p => p.Y).ToArray(),
+            $"Throughput vs granularity for {group.Key} clients",
+            "Granularity per client = chunk size / clients",
+            "Total candidates / second",
+            Path.Combine(outputDir, $"throughput_by_granularity_for_{group.Key}_clients.png"));
+    }
+}
+
+static void SaveClientPlotsPerGranularity(List<RunSummary> runs, string outputDir)
+{
+    foreach (var group in runs.GroupBy(r => r.GranularityPerClient).OrderBy(g => g.Key))
+    {
+        var points = group
+            .GroupBy(r => r.ConnectedClients)
+            .OrderBy(g => g.Key)
+            .Select(g => new
+            {
+                X = (double)g.Key,
+                Y = g.Average(r => r.TotalThroughput)
+            })
+            .ToList();
+
+        var safeGranularity = group.Key.ToString("0.###", CultureInfo.InvariantCulture).Replace('.', '_');
+
+        SaveScatter(
+            points.Select(p => p.X).ToArray(),
+            points.Select(p => p.Y).ToArray(),
+            $"Throughput vs clients for granularity {group.Key:0.###}",
+            "Connected clients",
+            "Total candidates / second",
+            Path.Combine(outputDir, $"throughput_by_clients_for_granularity_{safeGranularity}.png"));
+    }
+}
+
+static void SaveRunSummaryCsv(List<RunSummary> runs, string outputDir)
+{
+    var path = Path.Combine(outputDir, "run_summary.csv");
+
+    var lines = new List<string>
+    {
+        "experiment_name,run_sequence,chunk_size,connected_clients,granularity_per_client,client_threads,candidates_count,duration_seconds,total_throughput"
+    };
+
+    lines.AddRange(runs.Select(r => string.Join(",",
+        Csv(r.ExperimentName),
+        r.RunSequence.ToString(CultureInfo.InvariantCulture),
+        r.ChunkSize.ToString(CultureInfo.InvariantCulture),
+        r.ConnectedClients.ToString(CultureInfo.InvariantCulture),
+        r.GranularityPerClient.ToString(CultureInfo.InvariantCulture),
+        r.ClientThreads.ToString(CultureInfo.InvariantCulture),
+        r.CandidatesCount.ToString(CultureInfo.InvariantCulture),
+        r.DurationSeconds.ToString(CultureInfo.InvariantCulture),
+        r.TotalThroughput.ToString(CultureInfo.InvariantCulture)
+    )));
+
+    File.WriteAllLines(path, lines);
+}
+
 static void SaveScatter(
     double[] xs,
     double[] ys,
@@ -265,10 +386,18 @@ static void SaveScatter(
     plot.Axes.Bottom.TickGenerator = new ScottPlot.TickGenerators.NumericAutomatic
     {
         MinimumTickSpacing = 80,
-        IntegerTicksOnly = true
+        IntegerTicksOnly = false
     };
 
     plot.SavePng(path, 1400, 800);
+}
+
+static string Csv(string value)
+{
+    if (value.Contains(',') || value.Contains('"') || value.Contains('\n'))
+        return "\"" + value.Replace("\"", "\"\"") + "\"";
+
+    return value;
 }
 
 static string Get(string[] c, Dictionary<string, int> index, string name)
@@ -322,7 +451,8 @@ class RunSummary
     public int RunSequence { get; set; }
     public long ChunkSize { get; set; }
     public int ClientThreads { get; set; }
-    public int ConnectedClientsAtStart { get; set; }
+    public int ConnectedClients { get; set; }
+    public double GranularityPerClient { get; set; }
     public long CandidatesCount { get; set; }
     public double DurationSeconds { get; set; }
     public double TotalThroughput { get; set; }
