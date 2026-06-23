@@ -32,8 +32,8 @@
   linkcolor=black,
   urlcolor=blue!60!black,
   citecolor=black,
-  pdftitle={Sprawozdanie koncowe - Password Break},
-  pdfauthor={Zespol projektowy}
+  pdftitle={Sprawozdanie końcowe - Password Break},
+  pdfauthor={Rafał Grot, Dominika Jedynak, Kacper Kaczmarczyk}
 }
 
 % ------------------------------------------------------------------
@@ -88,19 +88,14 @@
 \captionsetup{font=small,labelfont=bf}
 \setlist{topsep=2pt,itemsep=1pt,parsep=0pt}
 
+\title{Sprawozdanie końcowe \\[0.3em] \large Password Break}
+\author{Rafał Grot \and Dominika Jedynak \and Kacper Kaczmarczyk}
+\date{\the\year}
+
 % ==================================================================
 \begin{document}
 
-% ----------------------- STRONA TYTUŁOWA --------------------------
-\begin{titlepage}
-\centering
-\vspace*{6cm}
-{\Huge\bfseries Sprawozdanie\par}
-\vspace{1cm}
-{\large Password Break\par}
-\vfill
-{\large \today\par}
-\end{titlepage}
+\maketitle
 
 \tableofcontents
 \newpage
@@ -111,8 +106,8 @@
 \subsection{Charakterystyka problemu}
 Hasła w rzeczywistych systemach nie są przechowywane w postaci jawnej, lecz jako wynik
 działania kryptograficznej funkcji skrótu. System uwierzytelniający nie zna bezpośrednio
-tekstu hasła, a jedynie jego skrót. Projektowany program nie odwraca funkcji haszującej --- co
-jest obliczeniowo niewykonalne --- lecz \emph{generuje} kolejnych kandydatów na hasło, oblicza ich
+tekstu hasła, a jedynie jego skrót. Projektowany program nie odwraca funkcji haszującej (co
+jest obliczeniowo niewykonalne), lecz \emph{generuje} kolejnych kandydatów na hasło, oblicza ich
 skróty i porównuje je ze skrótem docelowym.
 
 Problem można rozproszyć na wiele komputerów: poszczególni klienci niezależnie sprawdzają
@@ -140,9 +135,9 @@ czasu właściwych obliczeń.
 SHA-256 przekształca dane wejściowe dowolnej długości w ciąg o stałej długości 256 bitów
 (32 bajty). Kluczowe właściwości wykorzystywane w projekcie to:
 \begin{itemize}
-  \item \emph{deterministyczność} --- te same dane zawsze dają ten sam skrót,
-  \item \emph{jednokierunkowość} --- nie da się praktycznie odtworzyć danych ze skrótu,
-  \item \emph{odporność na kolizje} oraz \emph{efekt lawinowy} --- minimalna zmiana wejścia
+  \item \emph{deterministyczność}, te same dane zawsze dają ten sam skrót,
+  \item \emph{jednokierunkowość}, nie da się praktycznie odtworzyć danych ze skrótu,
+  \item \emph{odporność na kolizje} oraz \emph{efekt lawinowy}, minimalna zmiana wejścia
         całkowicie zmienia skrót.
 \end{itemize}
 Najdroższą operacją jest samo haszowanie, dlatego opłaca się porównywać jeden skrót z wieloma
@@ -292,7 +287,7 @@ strumieniuje zdarzenia do monitora. Wyniki i metryki zapisywane są po stronie s
         nieznalezione, sygnalizuje znalezienie wszystkich (\texttt{AllFound}) i zapisuje wyniki.
   \item[\texttt{ClientTracker}] Rejestr połączonych klientów (adres, czas ostatniego heartbeatu),
         używany do wykrywania rozłączeń.
-  \item[\texttt{ExperimentRunManager}] Obsługuje pojedyncze przebiegi eksperymentu --- katalog
+  \item[\texttt{ExperimentRunManager}] Obsługuje pojedyncze przebiegi eksperymentu, katalog
         wynikowy, pliki \texttt{metrics.csv}/\texttt{results.csv} oraz numer przebiegu.
   \item[\texttt{ServerRunState}] Stan serwera RUNNING/PAUSE przełączany SPACJĄ (\texttt{Toggle}).
   \item[\texttt{TaskTimeoutChecker}] Usługa działająca w tle; cyklicznie zwraca do kolejki
@@ -318,7 +313,7 @@ strumieniuje zdarzenia do monitora. Wyniki i metryki zapisywane są po stronie s
 % ==================================================================
 \section{Komunikacja}
 
-\subsection{Kontrakt --- Protocol Buffers}
+\subsection{Kontrakt: Protocol Buffers}
 Cała komunikacja jest opisana w pliku \texttt{Protos/password.proto}. Definiuje on dwie usługi:
 \texttt{PasswordBreaker} (praca rozproszona, strumień dwukierunkowy) oraz \texttt{Monitor}
 (strumień jednokierunkowy zdarzeń do monitora).
@@ -350,7 +345,7 @@ wczesnych założeń projektu (TASK / RESULT / STOP), tu w wersji rozszerzonej:
 \end{itemize}
 
 \subsection{Przebieg komunikacji}
-Rysunek \ref{fig:seq} pokazuje pełny cykl życia połączenia jednego klienta --- od nawiązania
+Rysunek \ref{fig:seq} pokazuje pełny cykl życia połączenia jednego klienta, od nawiązania
 strumienia, przez negocjację konfiguracji, oczekiwanie na start, aż po pętlę
 ,,zadanie $\rightarrow$ wynik''.
 
@@ -365,20 +360,20 @@ Heartbeaty wysyłane są równolegle do głównej pętli pracy.}
 \subsection{Heartbeat, timeout i ponowny przydział}
 Niezawodność systemu rozproszonego zapewniają trzy współpracujące mechanizmy:
 \begin{itemize}
-  \item \textbf{Heartbeat klienta} --- \texttt{GrpcClient.HeartbeatLoop} cyklicznie (interwał z
+  \item \textbf{Heartbeat klienta}, \texttt{GrpcClient.HeartbeatLoop} cyklicznie (interwał z
         \texttt{Config}) wysyła pustą wiadomość \texttt{Heartbeat}; serwer aktualizuje
         ,,ostatnio widziany'' w \texttt{ClientTracker}.
-  \item \textbf{Watchdog serwera} --- dla każdego połączenia \texttt{PasswordBreakerService}
+  \item \textbf{Watchdog serwera}, dla każdego połączenia \texttt{PasswordBreakerService}
         uruchamia zadanie kontrolne; jeśli od klienta nie ma heartbeatu dłużej niż
         \texttt{HeartbeatTimeoutSeconds}, strumień zostaje zamknięty, a w \texttt{Cleanup}
         bieżące zadanie klienta wraca do kolejki (\texttt{MarkPending}).
-  \item \textbf{Timeout zadania} --- hostowana usługa \texttt{TaskTimeoutChecker} okresowo
+  \item \textbf{Timeout zadania}, hostowana usługa \texttt{TaskTimeoutChecker} okresowo
         wywołuje \texttt{RequeueExpiredTasks}; zadanie pozostające w stanie \texttt{InProgress}
         dłużej niż \texttt{TaskTimeoutSeconds} jest zwracane do kolejki, co chroni przed
         zacięciem klienta na pojedynczej paczce.
 \end{itemize}
-Dodatkowo wynik dla zadania spoza aktywnego ,,przebiegu'' (lub już zakończonego) jest ignorowany
---- identyfikator zadania i numer przebiegu (\texttt{RunSequence}) pełnią funkcję ochrony przed
+Dodatkowo wynik dla zadania spoza aktywnego ,,przebiegu'' (lub już zakończonego) jest ignorowany;
+identyfikator zadania i numer przebiegu (\texttt{RunSequence}) pełnią funkcję ochrony przed
 duplikatami.
 
 \subsection{Synchronizacja słownika}
@@ -395,13 +390,13 @@ strumieniuje zdarzenia stanu systemu do opcjonalnego narzędzia podglądu.
 \section{Jak ogólnie działa projekt}
 
 \subsection{Cykl życia serwera i sterowanie przebiegiem}
-Po uruchomieniu serwer wchodzi w stan \textbf{PAUSE} --- klienci mogą się łączyć i pobierać
+Po uruchomieniu serwer wchodzi w stan \textbf{PAUSE}, klienci mogą się łączyć i pobierać
 konfigurację, ale nie otrzymują zadań. Operator steruje przebiegiem z konsoli:
 \begin{itemize}
-  \item \textbf{SPACJA} --- przełącza stan PAUSE\,$\leftrightarrow$\,RUNNING
+  \item \textbf{SPACJA}, przełącza stan PAUSE\,$\leftrightarrow$\,RUNNING
         (\texttt{ServerRunState.Toggle}). Przejście w RUNNING otwiera nowy ,,przebieg
         eksperymentu'' (\texttt{ExperimentRunManager.StartNewRun}) i tworzy katalog wynikowy.
-  \item \textbf{CTRL+C} --- zatrzymuje serwer i zapisuje wyniki.
+  \item \textbf{CTRL+C}, zatrzymuje serwer i zapisuje wyniki.
 \end{itemize}
 Każdy przebieg ma własny katalog \texttt{experiments/<nazwa>/} z plikami \texttt{metrics.csv}
 i \texttt{results.csv}; nazwa koduje liczbę klientów, liczbę wątków, \texttt{ChunkSize} oraz
@@ -438,7 +433,7 @@ długość i indeks lokalny, a następnie odtwarza kolejne hasła:
 
 \begin{listing}[H]
 \inputminted[firstline=184,lastline=196]{csharp}{../../password-break/password-break-client/HashWorker.cs}
-\caption{Odtwarzanie hasła z indeksu --- \texttt{HashWorker.IndexToPassword} (fragment pliku źródłowego).}
+\caption{Odtwarzanie hasła z indeksu, \texttt{HashWorker.IndexToPassword} (fragment pliku źródłowego).}
 \end{listing}
 
 \subsection{Obliczenia po stronie klienta (wielowątkowość)}
@@ -471,7 +466,7 @@ Klient mierzy czas właściwych obliczeń stoperem wokół wywołania strategii 
 \caption{Obliczanie metryk po stronie serwera (\texttt{PasswordBreakerService.SaveMetrics}).}
 \end{listing}
 
-Dla każdego ukończonego zadania serwer dopisuje wiersz do \texttt{metrics.csv} ---
+Dla każdego ukończonego zadania serwer dopisuje wiersz do \texttt{metrics.csv},
 m.in. \texttt{chunk\_size}, \texttt{client\_threads}, \texttt{connected\_clients\_at\_result},
 \texttt{compute\_time\_ms}, \texttt{communication\_time\_ms}, \texttt{throughput\_candidates\_per\_sec}.
 Mierzenie czasu całkowitego po stronie serwera eliminuje problem rozjazdu zegarów między maszynami.
@@ -499,7 +494,7 @@ Każdy przebieg trwał ustalony czas, a liczbę klientów zwiększano do 14.
 \textbf{Obserwacje:} wraz ze wzrostem liczby klientów całkowita przepustowość rośnie niemal
 liniowo; najwyższą wydajność uzyskano dla 14 klientów.
 
-\textbf{Wniosek:} dodawanie kolejnych węzłów zwiększa wydajność --- system wykorzystuje
+\textbf{Wniosek:} dodawanie kolejnych węzłów zwiększa wydajność, system wykorzystuje
 równoległość obliczeń, a narzut koordynacji nie dominuje.
 
 \subsection{Wpływ granulacji i liczby klientów}
@@ -517,6 +512,132 @@ Dla większej liczby klientów osiągana jest wyższa przepustowość.
 
 \textbf{Wniosek:} przy zbyt małej granulacji narzut komunikacji jest zbyt duży i obniża przepustowość.
 
+\subsection{Łączny wpływ liczby klientów i granulacji}
+Przepustowość i efektywność zależą jednocześnie od dwóch parametrów, liczby klientów oraz
+wielkości chunku. Sama przepustowość rośnie monotonicznie z obu (co widać już na wykresach 2D),
+więc bardziej pouczająca jest powierzchnia \emph{efektywności} $E(n)=S(n)/n$ (rys.~\ref{fig:effsurface}),
+gdzie $x$ to liczba klientów, $y$ to wielkość chunku, a $z$ to efektywność.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.92\linewidth]{wykresy/efficiency_surface.png}
+\caption{Efektywność skalowania $E(n)=S(n)/n$ w funkcji liczby klientów i wielkości chunku.}
+\label{fig:effsurface}
+\end{figure}
+
+\textbf{Obserwacje:} powierzchnia efektywności tworzy płaskowyż blisko 1{,}0 dla dużych chunków
+(5M, 10M) niezależnie od liczby klientów oraz wyraźne ,,urwisko'' opadające do ok.~0{,}2 w narożniku
+o małym chunku i dużej liczbie klientów.
+
+\textbf{Wniosek:} oba czynniki działają łącznie, duża liczba klientów daje pełen efekt dopiero
+przy odpowiednio dużej granulacji; sam wzrost liczby klientów przy małym chunku nie wystarcza.
+
+\subsection{Przyspieszenie i efektywność skalowania}
+\emph{Przyspieszenie} to iloraz całkowitej przepustowości dla $n$ klientów do przepustowości dla
+jednego klienta (przy tej samej wielkości chunku), a \emph{efektywność} to przyspieszenie
+znormalizowane liczbą klientów:
+\[
+S(n) = \frac{\text{przepustowość}(n)}{\text{przepustowość}(1)},
+\qquad
+E(n) = \frac{S(n)}{n}.
+\]
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\linewidth]{wykresy/speedup_by_clients.png}
+\caption{Przyspieszenie w funkcji liczby klientów, osobno dla każdej wielkości chunku.
+Linia przerywana to skalowanie idealne $S(n)=n$.}
+\label{fig:speedup}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\linewidth]{wykresy/efficiency_by_clients.png}
+\caption{Efektywność skalowania $E(n)=S(n)/n$. Wartość 1{,}0 oznacza skalowanie idealne.}
+\label{fig:efficiency}
+\end{figure}
+
+\textbf{Obserwacje:} dla dużych chunków (5M, 10M) przyspieszenie pokrywa się z idealnym, a
+efektywność utrzymuje się blisko 1{,}0 aż do 14 klientów (chwilami nieznacznie powyżej~1,
+co wynika z wahań pomiaru i pełniejszego wykorzystania rdzeni). Dla małych chunków efektywność
+gwałtownie spada, przy chunku 100k i 14 klientach wynosi ok.~0{,}2, bo system spędza czas na
+obsłudze wielu drobnych zadań zamiast na obliczeniach.
+
+\textbf{Wniosek:} system skaluje się niemal idealnie, pod warunkiem dostatecznie dużej granulacji.
+Sama liczba klientów nie wystarcza, musi jej towarzyszyć odpowiednio duży chunk.
+
+\subsection{Narzut komunikacji względem obliczeń}
+Dla każdego zadania mierzony jest czas obliczeń (po stronie klienta) oraz czas komunikacji
+($t_4-t_1$ pomniejszony o czas obliczeń, liczony na serwerze). Rysunek~\ref{fig:commabs}
+zestawia oba czasy, a rysunek~\ref{fig:commfrac} pokazuje udział komunikacji w czasie obsługi
+pojedynczego zadania.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\linewidth]{wykresy/compute_vs_comm_by_chunk.png}
+\caption{Średni czas obliczeń i komunikacji na jedno zadanie w funkcji wielkości chunku.}
+\label{fig:commabs}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\linewidth]{wykresy/comm_overhead_by_chunk.png}
+\caption{Udział czasu komunikacji w całkowitym czasie obsługi zadania.}
+\label{fig:commfrac}
+\end{figure}
+
+\textbf{Obserwacje:} czas komunikacji jest niemal stały (ok.~1--2~ms na zadanie) i nie zależy od
+wielkości chunku, natomiast czas obliczeń rośnie liniowo z chunkiem (od ok.~12~ms dla 100k do
+ok.~1160~ms dla 10M). W rezultacie udział komunikacji spada z ok.~7{,}5\% dla chunku 100k do
+poniżej~0{,}3\% dla chunku 10M.
+
+\textbf{Wniosek:} narzut komunikacji jest stałym kosztem przypadającym na zadanie. Przy małych
+chunkach jest ich bardzo wiele, więc ten koszt kumuluje się i obniża przepustowość; przy dużych
+chunkach komunikacja jest pomijalna względem obliczeń. To spójne z obserwacjami dla granulacji
+oraz z efektywnością skalowania.
+
+\subsection{Balans obciążenia i stabilność połączeń}
+Sprawdzono, czy praca rozkłada się równo i czy żaden węzeł nie odstawał. Pracę przypisano do
+\emph{sesji klienta} (\texttt{client\_id}). Identyfikator sesji jest nadawany przy każdym
+połączeniu (\texttt{Connect}), więc po rozłączeniu i ponownym podłączeniu klient otrzymuje nowy
+\texttt{client\_id}; w zapisywanych metrykach nie ma stabilnego identyfikatora fizycznej maszyny.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\linewidth]{wykresy/work_per_session_clients_14_chunk_1000000.png}
+\caption{Rozkład pracy (sumy kandydatów) na sesję klienta dla przebiegu z 14 klientami i chunkiem 1M.}
+\label{fig:worksession}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\linewidth]{wykresy/session_churn_by_clients.png}
+\caption{Liczba odrębnych sesji (\texttt{client\_id}) względem zamierzonej liczby klientów.
+Odstęp od linii idealnej to skala ponownych połączeń (churn).}
+\label{fig:churn}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\linewidth]{wykresy/load_imbalance_by_clients.png}
+\caption{Niezrównoważenie pracy: stosunek maksymalnej pracy sesji do średniej (1{,}0 = idealnie równo).}
+\label{fig:imbalance}
+\end{figure}
+
+\textbf{Obserwacje:} dla małej liczby klientów (2--3) liczba sesji odpowiada liczbie klientów, a
+praca rozkłada się dość równo. Przy większej liczbie klientów liczba sesji wyraźnie przewyższa
+liczbę klientów (np.~14 klientów $\to$ ok.~50 sesji), co świadczy o licznych rozłączeniach i
+ponownych połączeniach w trakcie przebiegu. To z kolei rozdrabnia pracę pojedynczej maszyny na
+wiele krótkich sesji i podnosi pozorne niezrównoważenie (stosunek max/średnia rośnie do ok.~4
+dla 14 klientów).
+
+\textbf{Wniosek:} model \emph{pull} (klient sam pobiera kolejne zadania) sam w sobie wyrównuje
+obciążenie, szybsze maszyny pobierają więcej pracy, więc żaden węzeł nie blokuje pozostałych.
+Zaobserwowane niezrównoważenie wynika głównie z rozdrobnienia na sesje przy ponownych połączeniach,
+a nie z faktu, że jakiś komputer ,,nie liczył''. Pełna analiza \emph{per maszyna} wymagałaby
+zapisania stabilnego identyfikatora (np.~adresu IP klienta) w \texttt{metrics.csv}, obecnie
+\texttt{client\_id} identyfikuje sesję, nie maszynę.
+
 \subsection{Wcześniej zauważone problemy i ich usunięcie}
 W trakcie prac (etap prototypu) zidentyfikowano i naprawiono ograniczenia wydajności:
 \begin{itemize}
@@ -531,10 +652,18 @@ W trakcie prac (etap prototypu) zidentyfikowano i naprawiono ograniczenia wydajn
 \begin{itemize}
   \item Zbudowano działający system rozproszony w architekturze klient--serwer (gRPC, .NET),
         realizujący dynamiczny przydział pracy i zbieranie wyników.
-  \item System \textbf{dobrze skaluje się} wraz ze wzrostem liczby klientów --- przepustowość
-        rośnie niemal liniowo.
+  \item System \textbf{dobrze skaluje się} wraz ze wzrostem liczby klientów, przepustowość
+        rośnie niemal liniowo, a dla dużych chunków efektywność skalowania utrzymuje się blisko
+        1{,}0 aż do 14 klientów.
   \item \textbf{Granulacja zadań} ma istotny wpływ na wydajność: zbyt małe zadania powodują
-        nadmierny narzut komunikacyjny, przez co przepustowość spada.
+        nadmierny narzut komunikacyjny, przez co przepustowość i efektywność spadają (przy chunku
+        100k efektywność dla 14 klientów spada do ok.~0{,}2).
+  \item \textbf{Narzut komunikacji jest stały}, ok.~1--2~ms na zadanie, niezależnie od wielkości
+        chunku. O jego łącznym wpływie decyduje liczba zadań: udział komunikacji spada z ok.~7{,}5\%
+        (chunk 100k) do poniżej~0{,}3\% (chunk 10M).
+  \item \textbf{Obciążenie rozkłada się równomiernie} dzięki modelowi \emph{pull}; żaden węzeł nie
+        blokował obliczeń. Per-sesyjne niezrównoważenie wynika z ponownych połączeń, a nie z
+        nierównej pracy maszyn.
   \item Najlepsze wyniki osiągnięto przy dużej liczbie klientów.
   \item Mechanizmy heartbeat, watchdog i timeout zadań zapewniają odporność na rozłączenia i
         zawieszenia klientów, a numeracja przebiegów i zadań chroni przed duplikatami wyników.
